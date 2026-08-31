@@ -9,9 +9,9 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>br.com.olius</groupId>
-	<artifactId>olius-api</artifactId>
+	<artifactId>olius-core-api</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>olius-api</name>
+	<name>olius-core-api</name>
 	<description/>
 	<url/>
 	<licenses>

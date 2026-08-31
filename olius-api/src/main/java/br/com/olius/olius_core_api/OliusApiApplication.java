@@ -1,4 +1,4 @@
-package br.com.olius.olius_api;
+package br.com.olius.olius_core_api;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
