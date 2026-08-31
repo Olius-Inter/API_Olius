@@ -1,4 +1,4 @@
-package br.com.olius.olius_api.enums;
+package br.com.olius.olius_core_api.enums;
 
 /**
  * Espelha o tipo ENUM nativo do PostgreSQL {@code user_type_t}.
