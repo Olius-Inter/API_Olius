@@ -14,12 +14,14 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build and Tests
+    name: Build, Tests and Sonar
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -28,5 +30,10 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Build and Test
-        run: ./mvnw clean verify  
+      - name: Build, Test and Sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          ./mvnw clean verify \
+            org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+            -Dsonar.projectKey=Olius-Inter_API_Olius
