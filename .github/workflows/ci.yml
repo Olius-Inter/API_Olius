@@ -35,6 +35,9 @@ jobs:
           cache: maven
           cache-dependency-path: olius-api/pom.xml
 
+      - name: Dar permissão ao Maven Wrapper
+        run: chmod +x ./mvnw
+
       - name: Build, Test and Sonar
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
