@@ -17,6 +17,10 @@ jobs:
     name: Build, Tests and Sonar
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: olius-api
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +33,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: olius-api/pom.xml
 
       - name: Build, Test and Sonar
         env:
