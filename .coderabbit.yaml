@@ -1,0 +1,40 @@
+language: "pt-BR"
+
+reviews:
+  profile: "assertive"
+
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_instructions:
+    - path: "olius-api/src/main/java/**/*.java"
+      instructions: |
+        Revise o código considerando boas práticas de Java e Spring Boot.
+        Verifique separação de responsabilidades entre Controller, Service e Repository.
+        Identifique possíveis problemas de tratamento de exceções, validação de dados,
+        regras de negócio, injeção de dependências e segurança.
+        Evite sugerir alterações apenas estéticas quando não trouxerem benefício relevante.
+
+    - path: "olius-api/src/test/**/*.java"
+      instructions: |
+        Verifique se os testes cobrem adequadamente o comportamento alterado.
+        Identifique cenários importantes não testados e possíveis casos de borda.
+
+    - path: "olius-api/pom.xml"
+      instructions: |
+        Analise alterações de dependências com atenção para necessidade,
+        compatibilidade e possíveis impactos de segurança.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Verifique alterações no CI com atenção para segurança, permissões,
+        exposição de secrets e estabilidade do pipeline.
+
+chat:
+  auto_reply: true
