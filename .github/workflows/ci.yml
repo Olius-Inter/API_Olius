@@ -23,7 +23,7 @@ jobs:
         env:
           POSTGRES_DB: olius_test
           POSTGRES_USER: olius_ci
-          POSTGRES_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          POSTGRES_PASSWORD: olius_ci_test_password
         ports:
           - 5432:5432
         options: >-
@@ -58,7 +58,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/olius_test
           SPRING_DATASOURCE_USERNAME: olius_ci
-          SPRING_DATASOURCE_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          SPRING_DATASOURCE_PASSWORD: olius_ci_test_password
         run: |
           ./mvnw clean verify \
             org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
