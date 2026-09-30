@@ -1,0 +1,22 @@
+name: olius-local
+
+services:
+  postgres-dev:
+    image: postgres:16.15
+    environment:
+      POSTGRES_DB: ${CONTAINER_DEV_NAME}
+      POSTGRES_USER: ${CONTAINER_DEV_USER}
+      POSTGRES_PASSWORD: ${CONTAINER_DEV_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U olius_dev_admin -d olius_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres-dev-data:
