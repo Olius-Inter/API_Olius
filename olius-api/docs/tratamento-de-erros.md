@@ -263,7 +263,7 @@ A execução local de `mvnw.cmd verify`, com Java 21 Temurin e Docker Desktop, c
 
 O PostgreSQL 16.15 iniciou automaticamente em uma porta dinâmica. Os testes de integração confirmaram a execução dos scripts, as 52 tabelas públicas e os cenários de persistência, auditoria e rollback. O Maven também gerou o JAR da aplicação. Essa validação foi local, sem executar a análise Sonar ou o workflow remoto.
 
-Foram emitidos avisos não bloqueantes sobre uso de API obsoleta nos testes MVC e carregamento dinâmico do agente Mockito/Byte Buddy. Eles não impediram a execução, mas merecem revisão em futuras atualizações das ferramentas.
+Na validação inicial apareceram avisos sobre API obsoleta e carregamento dinâmico do Mockito. A configuração de agente explícito descrita abaixo substitui esse carregamento dinâmico. O aviso sobre compartilhamento de classes da JVM (CDS) pode continuar aparecendo; ele é diferente do aviso de autoanexação do Mockito.
 
 ### Scripts utilizados
 
@@ -305,6 +305,38 @@ Para verificar e empacotar:
 ```
 
 O comando local acima não executa o Sonar por si só. Os relatórios de testes ficam em `target/surefire-reports`. Falha ao iniciar o container, preparar o schema ou executar uma asserção faz o Maven falhar; no CI, isso reprova a etapa. A análise Sonar também pode falhar independentemente do resultado dos testes.
+
+### Mockito como agente dos testes
+
+O `pom.xml` declara `mockito-core` com escopo `test`, mantendo a versão gerenciada pelo Spring Boot. O objetivo `properties` do `maven-dependency-plugin`, na fase `initialize`, resolve o caminho do JAR. O Surefire inicia a JVM dos testes com:
+
+```xml
+<argLine>@{argLine} -javaagent:"${org.mockito:mockito-core:jar}"</argLine>
+```
+
+Isso carrega o agente na inicialização, em vez de o Mockito tentar anexá-lo durante a execução. As aspas aceitam caminhos com espaços. A propriedade `argLine` vazia fornece um valor padrão e permite composição posterior com agentes de cobertura. Não é necessário alterar o CI: ele já executa o ciclo Maven `verify`. Essa configuração não adiciona o agente à execução normal da aplicação.
+
+#### Executar no IntelliJ
+
+Após alterar o POM, utilize **Reload All Maven Projects**. Para executar com a mesma configuração do CI, abra a janela **Maven**, expanda **Lifecycle** e execute **test** ou **verify**.
+
+Para que as ações Run/Debug sejam delegadas ao Maven, em **Settings → Build, Execution, Deployment → Build Tools → Maven → Runner**, habilite **Delegate IDE build/run actions to Maven**. Essa é uma preferência local: não foi alterada automaticamente nem adicionada ao versionamento.
+
+Uma configuração JUnit executada diretamente pelo IntelliJ não deve ser considerada coberta automaticamente pelo `argLine` do Surefire. Se continuar usando o executor JUnit nativo, será necessário configurar o agente nas opções da JVM dessa execução. Prefira o caminho Maven acima para não duplicar caminhos e versões em configurações locais.
+
+#### Verificação sem carregamento dinâmico
+
+É possível verificar a configuração no Windows com:
+
+```powershell
+.\mvnw.cmd verify "-DargLine=-XX:-EnableDynamicAgentLoading"
+```
+
+Validação realizada em 04/10/2026: esse comando concluiu com **BUILD SUCCESS**, **49 testes aprovados**, nenhuma falha, erro ou teste ignorado. Não apareceram os avisos de autoanexação do Mockito ou carregamento dinâmico do agente. A análise Sonar e o executor JUnit nativo do IntelliJ não foram executados nessa validação.
+
+Esse argumento bloqueia a anexação dinâmica durante a verificação; não oculta o aviso. O agente explícito permanece habilitado pelo Surefire. O aviso `Sharing is only supported for boot loader classes...` pode permanecer devido à instrumentação e não indica falha dos testes. Não foi adicionada uma opção para desativar CDS apenas para escondê-lo.
+
+Referências: [instrumentação explícita no Mockito](https://github.com/mockito/mockito/blob/main/mockito-core/src/main/java/org/mockito/Mockito.java) e [delegação ao Maven no IntelliJ](https://www.jetbrains.com/help/idea/delegate-build-and-run-actions-to-maven.html).
 
 ## 12. Como evoluir esta infraestrutura
 
