@@ -90,6 +90,8 @@ class GlobalExceptionHandlerTest {
 
     @ParameterizedTest
     @CsvSource({"missing,404,RESOURCE_NOT_FOUND", "conflict,409,RESOURCE_CONFLICT",
+                "authentication,401,AUTHENTICATION_REQUIRED", "access,403,ACCESS_DENIED",
+                "concurrent,409,CONCURRENT_MODIFICATION", "optimistic,409,CONCURRENT_MODIFICATION",
                 "state,409,BUSINESS_STATE_CONFLICT", "semantic,422,BUSINESS_RULE_VIOLATION",
                 "unexpected,500,INTERNAL_ERROR", "sql,500,INTERNAL_ERROR",
                 "offline,503,SERVICE_UNAVAILABLE", "http,418,HTTP_REQUEST_ERROR"})
@@ -106,18 +108,74 @@ class GlobalExceptionHandlerTest {
             });
     }
 
+    @Test
+    void authenticationIncludesBearerChallenge() throws Exception {
+        mvc.perform(get("/test/error/authentication"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"))
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    @Test
+    void serverHttpErrorPreservesStatusAndHeaders() throws Exception {
+        mvc.perform(get("/test/unavailable"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(header().string(HttpHeaders.RETRY_AFTER, "30"))
+            .andExpect(jsonPath("$.code").value("SERVICE_UNAVAILABLE"))
+            .andExpect(result -> assertThat(result.getResponse().getContentAsString()).doesNotContain("secret"));
+    }
+
+    @Test
+    void logsSafeSqlMetadataWithoutMessagesOrThrowable() throws Exception {
+        var logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            mvc.perform(get("/test/error/wrapped-sql"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                    .doesNotContain("23514", "SQLException", "secret"));
+            assertThat(appender.list).hasSize(1);
+            var event = appender.list.getFirst();
+            assertThat(event.getFormattedMessage())
+                .contains("exceptionType=java.lang.IllegalStateException",
+                          "rootCauseType=java.sql.SQLException", "sqlState=23514")
+                .doesNotContain("secret", "SELECT", "password");
+            assertThat(event.getThrowableProxy()).isNull();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
     @RestController
     static class TestController {
         record Input(@NotBlank String name, @Email String email) {}
 
         @PostMapping(value = "/test", consumes = "application/json")
-        void validate(@Valid @RequestBody Input input) {}
+        void validate(@Valid @RequestBody Input input) {
+            // Fixture: o teste avalia a validação MVC antes de executar o corpo.
+        }
 
         @GetMapping("/test/id/{id}")
-        void id(@PathVariable UUID id) {}
+        void id(@PathVariable UUID id) {
+            // Fixture: somente a conversão do parâmetro UUID está sob teste.
+        }
 
         @GetMapping("/test/parameter")
-        void parameter(@RequestParam int page) {}
+        void parameter(@RequestParam int page) {
+            // Fixture: somente a obrigatoriedade do parâmetro está sob teste.
+        }
+
+        @GetMapping("/test/unavailable")
+        void unavailable() {
+            var error = new org.springframework.web.ErrorResponseException(HttpStatus.SERVICE_UNAVAILABLE);
+            error.getHeaders().set(HttpHeaders.RETRY_AFTER, "30");
+            error.setDetail("secret");
+            throw error;
+        }
 
         @GetMapping(value = "/test/json", produces = "application/json")
         String json() { return "{}"; }
@@ -125,6 +183,12 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/error/{kind}")
         void error(@PathVariable String kind) throws SQLException {
             switch (kind) {
+                case "authentication" -> throw new org.springframework.security.authentication.BadCredentialsException("secret");
+                case "access" -> throw new org.springframework.security.access.AccessDeniedException("secret");
+                case "concurrent" -> throw new org.springframework.dao.CannotAcquireLockException("secret");
+                case "optimistic" -> throw new org.springframework.dao.OptimisticLockingFailureException("secret");
+                case "wrapped-sql" -> throw new IllegalStateException("secret",
+                        new SQLException("SELECT password secret", "23514"));
                 case "missing" -> throw new ResourceNotFoundException();
                 case "conflict" -> throw new ResourceConflictException();
                 case "state" -> throw new BusinessRuleException(BusinessRuleException.Reason.STATE_CONFLICT);

@@ -11,6 +11,8 @@ import java.sql.SQLException;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
@@ -153,6 +155,85 @@ class OliusApiApplicationTests {
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()));
         assertThat(findSql(failure).getSQLState()).isEqualTo("23514");
         assertThat(translator.translate(failure)).isEqualTo(ApiErrorCode.INTERNAL_ERROR);
+    }
+
+    @Test
+    void duplicateCpfUsesActualDatabaseConstraint() {
+        insertCitizen("11111111111");
+        Throwable failure = catchThrowable(() -> insertCitizen("11111111111"));
+        assertUniqueConstraint(failure, "citizens_cpf_key", ApiErrorCode.REGISTRATION_CONFLICT);
+    }
+
+    @Test
+    void duplicateCnpjUsesActualDatabaseConstraint() {
+        insertEstablishment("11111111111111");
+        Throwable failure = catchThrowable(() -> insertEstablishment("11111111111111"));
+        assertUniqueConstraint(failure, "establishment_cnpj_key", ApiErrorCode.REGISTRATION_CONFLICT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void duplicatePevOwnerUsesActualDatabaseConstraint(boolean citizen) {
+        UUID owner = citizen ? insertCitizen("22222222222") : insertEstablishment("22222222222222");
+        UUID firstAddress = insertAddress("PEV");
+        UUID secondAddress = insertAddress("PEV");
+        // As duas instruções são fixas; nenhum identificador SQL vem de entrada externa.
+        String sql = citizen
+                ? "INSERT INTO pev(citizen_id,address_id) VALUES (?,?)"
+                : "INSERT INTO pev(establishment_id,address_id) VALUES (?,?)";
+        jdbc.update(sql, owner, firstAddress);
+        Throwable failure = catchThrowable(() -> jdbc.update(sql, owner, secondAddress));
+        assertUniqueConstraint(failure, citizen ? "pev_citizen_id_key" : "pev_establishment_id_key",
+                ApiErrorCode.PEV_ALREADY_EXISTS);
+    }
+
+    private void assertUniqueConstraint(Throwable failure, String constraint, ApiErrorCode code) {
+        assertThat(failure).isNotNull();
+        SQLException sql = findSql(failure);
+        assertThat(sql.getSQLState()).isEqualTo("23505");
+        assertThat((Object) sql).isInstanceOf(org.postgresql.util.PSQLException.class);
+        var metadata = ((org.postgresql.util.PSQLException) sql).getServerErrorMessage();
+        assertThat(metadata).isNotNull();
+        assertThat(metadata.getConstraint()).isEqualTo(constraint);
+        assertThat(translator.translate(failure)).isEqualTo(code);
+    }
+
+    private UUID insertCitizen(String cpf) {
+        UUID user = insertSpecializedUser("CITIZENS");
+        String token = insertQr(user, "CITIZENS");
+        jdbc.update("INSERT INTO citizens(id,cpf,qr_token) VALUES (?,?,?)", user, cpf, token);
+        return user;
+    }
+
+    private UUID insertEstablishment(String cnpj) {
+        UUID user = insertSpecializedUser("ESTABLISHMENT");
+        String token = insertQr(user, "ESTABLISHMENT");
+        UUID type = jdbc.queryForObject("INSERT INTO establishment_type(name) VALUES (?) RETURNING id",
+                UUID.class, "Teste-" + UUID.randomUUID());
+        UUID address = insertAddress("ESTABLISHMENT");
+        jdbc.update("INSERT INTO establishment(id,cnpj,qr_token,type_id,address_id) VALUES (?,?,?,?,?)",
+                user, cnpj, token, type, address);
+        return user;
+    }
+
+    private UUID insertSpecializedUser(String type) {
+        return jdbc.queryForObject(
+                "INSERT INTO users(name,email,password_hash,user_type) VALUES ('Teste',?,'test-hash',?::user_type_t) RETURNING id",
+                UUID.class, UUID.randomUUID() + "@test.invalid", type);
+    }
+
+    private String insertQr(UUID user, String type) {
+        String token = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO user_qr_code(user_id,qr_token,user_type) VALUES (?,?,?::user_type_t)",
+                user, token, type);
+        return token;
+    }
+
+    private UUID insertAddress(String kind) {
+        return jdbc.queryForObject(
+                "INSERT INTO addresses(owner_kind,state,city,neighborhood,street,number,cep) " +
+                "VALUES (?::address_owner_t,'SP','Teste','Teste','Teste','1','00000000') RETURNING id",
+                UUID.class, kind);
     }
 
     private UUID insertUser(String email) {

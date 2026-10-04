@@ -48,5 +48,24 @@ class ProblemSecurityHandlersTest {
         new ProblemAuthenticationEntryPoint(factory, mapper).commence(new MockHttpServletRequest(),
                 response, new BadCredentialsException("private"));
         assertThat(response.getStatus()).isEqualTo(202);
+        assertThat(response.getContentAsString()).isEmpty();
+        assertThat(response.getHeader("WWW-Authenticate")).isNull();
+        assertThat(response.getHeader("X-Request-Id")).isNull();
+    }
+
+    @Test
+    void deniedHandlerPreservesCommittedBodyAndHeaders() throws Exception {
+        var response = new MockHttpServletResponse();
+        response.setStatus(202);
+        response.setHeader("X-Existing", "preserved");
+        response.getWriter().write("existing body");
+        response.flushBuffer();
+        new ProblemAccessDeniedHandler(factory, mapper).handle(new MockHttpServletRequest(),
+                response, new AccessDeniedException("private"));
+        assertThat(response.getStatus()).isEqualTo(202);
+        assertThat(response.getContentAsString()).isEqualTo("existing body");
+        assertThat(response.getHeader("X-Existing")).isEqualTo("preserved");
+        assertThat(response.getHeader("X-Request-Id")).isNull();
+        assertThat(response.getHeader("WWW-Authenticate")).isNull();
     }
 }
