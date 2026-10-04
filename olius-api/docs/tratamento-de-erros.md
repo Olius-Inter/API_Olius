@@ -338,6 +338,22 @@ Esse argumento bloqueia a anexação dinâmica durante a verificação; não ocu
 
 Referências: [instrumentação explícita no Mockito](https://github.com/mockito/mockito/blob/main/mockito-core/src/main/java/org/mockito/Mockito.java) e [delegação ao Maven no IntelliJ](https://www.jetbrains.com/help/idea/delegate-build-and-run-actions-to-maven.html).
 
+### Cobertura de testes e Sonar
+
+Testes aprovados indicam que as verificações passaram; cobertura indica quais linhas e decisões do código foram exercitadas. O Sonar importa essa medição, mas executar JUnit por si só não gera o relatório de cobertura.
+
+O `jacoco-maven-plugin` 0.8.14 prepara seu agente antes dos testes e gera o relatório na fase `verify`. O Surefire combina o agente de cobertura, por meio de `@{argLine}`, com o agente explícito do Mockito. Não foram adicionadas exclusões de classes para elevar artificialmente a cobertura. A opção `append=false` evita acumular medições de execuções anteriores no processo de testes atual; se futuramente houver múltiplos forks/processos, essa estratégia deverá ser revista.
+
+Execute `mvnw.cmd verify` (ou `mvnw.cmd clean verify` para uma construção limpa) para produzir:
+
+- `target/site/jacoco/index.html`: relatório navegável para inspeção local.
+- `target/site/jacoco/jacoco.xml`: relatório que o Sonar importa.
+- `target/jacoco.exec`: dados binários coletados pelo agente.
+
+Esses arquivos são gerados em `target/` e não devem ser versionados. `mvnw.cmd test` coleta os dados, mas não alcança a fase `verify` que gera o relatório. Use o ciclo de vida Maven, e não apenas o objetivo isolado `surefire:test`, para preparar os agentes.
+
+A propriedade `sonar.coverage.jacoco.xmlReportPaths` aponta explicitamente para o XML. O CI já executa `clean verify` antes do objetivo Sonar; portanto, o relatório será produzido antes da importação. O Quality Gate da PR exige 80% de cobertura no código novo. A medição local de todo o projeto é uma referência, mas a confirmação desse critério depende da análise remota das linhas alteradas.
+
 ## 12. Como evoluir esta infraestrutura
 
 1. Definir o significado da nova rejeição com base na funcionalidade aprovada.

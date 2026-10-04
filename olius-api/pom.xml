@@ -31,6 +31,7 @@
 		<!-- Permite composição com agentes de cobertura que preencham argLine. -->
 		<argLine/>
 		<sonar.organization>olius-inter</sonar.organization>
+		<sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
 	</properties>
 	<dependencies>
 		<!-- Bancos -->
@@ -129,6 +130,25 @@
 
 	<build>
 		<plugins>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.14</version>
+				<configuration>
+					<append>false</append>
+				</configuration>
+				<executions>
+					<execution>
+						<id>coverage-agent</id>
+						<goals><goal>prepare-agent</goal></goals>
+					</execution>
+					<execution>
+						<id>coverage-report</id>
+						<phase>verify</phase>
+						<goals><goal>report</goal></goals>
+					</execution>
+				</executions>
+			</plugin>
 			<!-- Resolve o caminho do agente sem fixar versão ou repositório local. -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
