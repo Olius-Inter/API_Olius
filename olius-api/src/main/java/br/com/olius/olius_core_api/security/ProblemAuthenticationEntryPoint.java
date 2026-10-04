@@ -12,7 +12,6 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Será conectado à SecurityFilterChain na sprint de identidade. */
 @Component
 public class ProblemAuthenticationEntryPoint implements AuthenticationEntryPoint {
     private final ApiProblemFactory factory;
@@ -23,6 +22,10 @@ public class ProblemAuthenticationEntryPoint implements AuthenticationEntryPoint
         this.mapper = mapper;
     }
 
+    /**
+     * Envia 401 com desafio Bearer sem reutilizar mensagens internas de autenticação.
+     * Uma resposta já enviada é preservada; este método não valida tokens.
+     */
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException exception) throws IOException {

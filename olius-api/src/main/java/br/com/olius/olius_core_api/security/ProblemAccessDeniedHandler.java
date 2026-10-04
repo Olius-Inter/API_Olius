@@ -11,7 +11,6 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Será conectado à SecurityFilterChain na sprint de identidade. */
 @Component
 public class ProblemAccessDeniedHandler implements AccessDeniedHandler {
     private final ApiProblemFactory factory;
@@ -22,6 +21,10 @@ public class ProblemAccessDeniedHandler implements AccessDeniedHandler {
         this.mapper = mapper;
     }
 
+    /**
+     * Apresenta a rejeição de autorização como 403, sem decidir permissões.
+     * Uma resposta já enviada é preservada.
+     */
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException exception) throws IOException {

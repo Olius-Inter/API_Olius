@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 public class ApiProblemFactory {
     private static final String TRACE_ATTRIBUTE = ApiProblemFactory.class.getName() + ".traceId";
 
+    /** Reutiliza um UUID por requisição, sem copiar tokens ou identificadores do cliente. */
     public String traceId(HttpServletRequest request) {
         Object existing = request.getAttribute(TRACE_ATTRIBUTE);
         if (existing instanceof String value) {
@@ -31,12 +32,11 @@ public class ApiProblemFactory {
         return create(code, status(code), request, List.of());
     }
 
+    /** Preserva o status HTTP recebido; detalhes públicos continuam definidos pelo catálogo. */
     public ProblemDetail create(ApiErrorCode code, HttpStatusCode status,
                                 HttpServletRequest request, List<FieldErrorResponse> errors) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail(code));
-        HttpStatus standard = HttpStatus.resolve(status.value());
-        problem.setTitle(standard == null ? "Erro HTTP" :
-                code == ApiErrorCode.HTTP_REQUEST_ERROR ? "Erro na requisição" : title(code));
+        problem.setTitle(title(code, status));
         problem.setType(URI.create("urn:olius:problem:" + code.name().toLowerCase(Locale.ROOT).replace('_', '-')));
         // A URL pode conter um token de QR. A ocorrência usa um identificador opaco.
         problem.setInstance(URI.create("urn:uuid:" + traceId(request)));
@@ -66,8 +66,15 @@ public class ApiProblemFactory {
         };
     }
 
-    private String title(ApiErrorCode code) {
-        return switch (status(code)) {
+    private String title(ApiErrorCode code, HttpStatusCode status) {
+        HttpStatus standard = HttpStatus.resolve(status.value());
+        if (standard == null) {
+            return "Erro HTTP";
+        }
+        if (code == ApiErrorCode.HTTP_REQUEST_ERROR && standard == HttpStatus.BAD_REQUEST) {
+            return "Erro na requisição";
+        }
+        return switch (standard) {
             case BAD_REQUEST -> "Requisição inválida";
             case UNAUTHORIZED -> "Autenticação necessária";
             case FORBIDDEN -> "Acesso negado";
@@ -78,7 +85,8 @@ public class ApiProblemFactory {
             case UNSUPPORTED_MEDIA_TYPE -> "Formato não suportado";
             case NOT_ACCEPTABLE -> "Formato de resposta não disponível";
             case SERVICE_UNAVAILABLE -> "Serviço indisponível";
-            default -> "Erro interno";
+            case INTERNAL_SERVER_ERROR -> "Erro interno";
+            default -> standard.getReasonPhrase();
         };
     }
 

@@ -25,6 +25,10 @@ public class PersistenceExceptionTranslator {
         "pev.pev_establishment_id_key", ApiErrorCode.PEV_ALREADY_EXISTS
     );
 
+    /**
+     * Traduz somente falhas com significado público conhecido; o restante vira erro interno.
+     * Não executa rollback nem retry e nunca interpreta a mensagem textual do banco.
+     */
     public ApiErrorCode translate(Throwable failure) {
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         for (Throwable current = failure; current != null && seen.add(current); current = current.getCause()) {

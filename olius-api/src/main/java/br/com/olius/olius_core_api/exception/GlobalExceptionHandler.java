@@ -19,6 +19,10 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+/**
+ * Fronteira HTTP do tratamento MVC: preserva status/cabeçalhos e padroniza o corpo.
+ * Falhas em filtros anteriores ao MVC exigem os componentes próprios de segurança.
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
@@ -55,9 +59,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         }
         ApiErrorCode code = translator.translate(ex);
         if (code == ApiErrorCode.INTERNAL_ERROR || code == ApiErrorCode.SERVICE_UNAVAILABLE) {
-            // Mensagens e stack traces de drivers podem carregar SQL, valores e credenciais.
-            LOG.error("Falha na requisição traceId={} code={} exceptionType={}",
-                    factory.traceId(request), code, ex.getClass().getName());
+            logFailure(ex, code, factory.status(code), request);
         }
         return response(code, request);
     }
@@ -104,14 +106,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             default -> status.is5xxServerError() ? ApiErrorCode.INTERNAL_ERROR : ApiErrorCode.HTTP_REQUEST_ERROR;
         };
         if (status.is5xxServerError()) {
-            LOG.error("Falha HTTP traceId={} status={} exceptionType={}",
-                    factory.traceId(request), status.value(), ex.getClass().getName());
+            logFailure(ex, code, status, request);
         }
         HttpHeaders headers = new HttpHeaders();
         headers.putAll(originalHeaders);
         headers.setContentType(MediaType.APPLICATION_PROBLEM_JSON);
         headers.set("X-Request-Id", factory.traceId(request));
         return new ResponseEntity<>(factory.create(code, status, request, errors), headers, status);
+    }
+
+    /** Registra apenas metadados; nunca mensagens, SQL ou stack traces do driver. */
+    private void logFailure(Exception ex, ApiErrorCode code, HttpStatusCode status,
+                            HttpServletRequest request) {
+        if (LOG.isErrorEnabled()) {
+            var diagnostic = SafeExceptionDiagnostic.from(ex);
+            LOG.error("Falha na requisição traceId={} code={} status={} exceptionType={} rootCauseType={} sqlState={}",
+                    factory.traceId(request), code, status.value(), ex.getClass().getName(),
+                    diagnostic.rootCauseType(), diagnostic.sqlState());
+        }
     }
 
     private ResponseEntity<Object> response(ApiErrorCode code, HttpServletRequest request) {

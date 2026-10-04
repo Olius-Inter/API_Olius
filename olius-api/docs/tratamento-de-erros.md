@@ -34,6 +34,7 @@ As classes de produção estão em `src/main/java/br/com/olius/olius_core_api`.
 | `exception/BusinessRuleException` | Sinaliza rejeição por conflito de estado ou incompatibilidade semântica dos dados. |
 | `exception/ApiProblemFactory` | Monta o `ProblemDetail`, mensagens, status padrão e identificação da ocorrência. |
 | `exception/PersistenceExceptionTranslator` | Interpreta falhas conhecidas de persistência e devolve um `ApiErrorCode`. |
+| `exception/SafeExceptionDiagnostic` | Extrai somente tipo da causa e SQLSTATE para logs internos, com proteção contra ciclos e texto arbitrário. |
 | `exception/GlobalExceptionHandler` | Coordena o tratamento MVC e devolve a resposta HTTP. Estende `ResponseEntityExceptionHandler`. |
 | `exception/dto/FieldErrorResponse` | Representa um item da lista de erros de validação, não a resposta completa. |
 | `security/ProblemAuthenticationEntryPoint` | Escreve a resposta 401 de autenticação necessária quando acionado pela segurança. |
@@ -142,6 +143,8 @@ O cliente deve utilizar `code` para distinguir situações. Não deve comparar o
 
 \* Quando o erro já vem do mecanismo HTTP do Spring, o handler preserva o status original. Assim, um erro HTTP 418 pode usar `HTTP_REQUEST_ERROR` com status 418; outro erro 5xx pode usar `INTERNAL_ERROR` mantendo seu status. O status padrão da Factory não sobrescreve esse caminho.
 
+O título usa o status HTTP efetivamente recebido pela Factory, mesmo quando difere do status padrão do código. Status não reconhecidos utilizam `Erro HTTP`; códigos HTTP conhecidos sem título traduzido usam a descrição padrão do Spring. O código e a mensagem pública continuam definidos pelo catálogo.
+
 Cabeçalhos HTTP originais, como `Allow` em um erro 405, são preservados nesse tratamento. A resposta 401 produzida pelo tratamento de autenticação inclui `WWW-Authenticate: Bearer`.
 
 ## 6. Validação estrutural e regras de negócio
@@ -205,7 +208,7 @@ Os filtros de segurança podem rejeitar uma requisição antes do controller. Ne
 
 ## 9. Logs e proteção de dados
 
-O handler não utiliza a mensagem SQL como mensagem pública. Para falhas internas ou de indisponibilidade, registra identificador, código ou status e tipo da exceção, sem imprimir diretamente mensagem e stack trace do driver.
+O handler não utiliza a mensagem SQL como mensagem pública. Para falhas internas ou de indisponibilidade, registra identificador, código, status, tipo da exceção original, tipo da causa raiz e SQLSTATE. A extração percorre causas e exceções JDBC encadeadas com proteção contra ciclos. SQLSTATE só é aceito no formato de cinco letras maiúsculas ou dígitos; quando indisponível, registra `unavailable`. Mensagens, comandos SQL, valores pessoais e stack traces não são registrados por esse caminho. Os metadados adicionais não são enviados na resposta pública e só são calculados quando o nível ERROR está habilitado.
 
 Em `src/main/resources/application.properties`:
 
@@ -225,9 +228,11 @@ Os testes estão em `src/test/java/br/com/olius/olius_core_api`:
 | Classe | O que verifica |
 | --- | --- |
 | `exception/GlobalExceptionHandlerTest` | Respostas MVC, validação, cabeçalhos, preservação de status e proteção contra exposição de mensagens. |
+| `exception/ApiProblemFactoryTest` | Consistência de título e status, inclusive status não padronizados. |
+| `exception/SafeExceptionDiagnosticTest` | SQLSTATE encadeado, proteção contra ciclos e rejeição de conteúdo arbitrário. |
 | `exception/PersistenceExceptionTranslatorTest` | Metadados conhecidos, causas encadeadas, concorrência, indisponibilidade e fallback conservador. |
 | `security/ProblemSecurityHandlersTest` | Serialização das respostas 401/403, cabeçalhos e resposta já enviada. Não percorre a cadeia completa de segurança. |
-| `OliusApiApplicationTests` | Integração com PostgreSQL, estrutura de 52 tabelas públicas, duplicidade, auditoria, CHECKs e falhas de flush/commit. |
+| `OliusApiApplicationTests` | Integração com PostgreSQL, estrutura de 52 tabelas públicas, duplicidade de e-mail, telefone, CPF, CNPJ e dos dois tipos de responsável de PEV, auditoria, CHECKs e falhas de flush/commit. |
 | `testfixture/FlushProbe` | Entidade exclusiva de teste para provocar falha real de persistência JPA. |
 
 ### Funcionamento previsto
@@ -252,14 +257,16 @@ As anotações de preparação estão ativas em `OliusApiApplicationTests`:
 
 `@Testcontainers` habilita a extensão JUnit que gerencia o container declarado com `@Container`. Não é necessária uma chamada manual a `POSTGRES.start()` nesse fluxo. `@EntityScan` limita a descoberta de entidades ao pacote da fixture `FlushProbe`, mantendo as entidades de produção fora desse teste específico.
 
-A execução local de `mvnw.cmd verify`, com Java 21 Temurin e Docker Desktop, concluiu com **BUILD SUCCESS**: **49 testes executados, nenhuma falha, nenhum erro e nenhum teste ignorado**.
+A execução local de `mvnw.cmd verify`, com Java 21 Temurin e Docker Desktop, concluiu com **BUILD SUCCESS**: **71 testes executados, nenhuma falha, nenhum erro e nenhum teste ignorado**.
 
 | Classe | Testes aprovados |
 | --- | --- |
-| `GlobalExceptionHandlerTest` | 16 |
+| `GlobalExceptionHandlerTest` | 23 |
 | `PersistenceExceptionTranslatorTest` | 21 |
-| `OliusApiApplicationTests` | 9 |
-| `ProblemSecurityHandlersTest` | 3 |
+| `OliusApiApplicationTests` | 13 |
+| `ProblemSecurityHandlersTest` | 4 |
+| `ApiProblemFactoryTest` | 6 |
+| `SafeExceptionDiagnosticTest` | 4 |
 
 O PostgreSQL 16.15 iniciou automaticamente em uma porta dinâmica. Os testes de integração confirmaram a execução dos scripts, as 52 tabelas públicas e os cenários de persistência, auditoria e rollback. O Maven também gerou o JAR da aplicação. Essa validação foi local, sem executar a análise Sonar ou o workflow remoto.
 
@@ -332,7 +339,7 @@ Uma configuração JUnit executada diretamente pelo IntelliJ não deve ser consi
 .\mvnw.cmd verify "-DargLine=-XX:-EnableDynamicAgentLoading"
 ```
 
-Validação realizada em 04/10/2026: esse comando concluiu com **BUILD SUCCESS**, **49 testes aprovados**, nenhuma falha, erro ou teste ignorado. Não apareceram os avisos de autoanexação do Mockito ou carregamento dinâmico do agente. A análise Sonar e o executor JUnit nativo do IntelliJ não foram executados nessa validação.
+Validação inicial do agente em 04/10/2026, anterior à ampliação dos testes da revisão: esse comando concluiu com **BUILD SUCCESS**, **49 testes aprovados**, nenhuma falha, erro ou teste ignorado. Não apareceram os avisos de autoanexação do Mockito ou carregamento dinâmico do agente. A análise Sonar e o executor JUnit nativo do IntelliJ não foram executados nessa validação.
 
 Esse argumento bloqueia a anexação dinâmica durante a verificação; não oculta o aviso. O agente explícito permanece habilitado pelo Surefire. O aviso `Sharing is only supported for boot loader classes...` pode permanecer devido à instrumentação e não indica falha dos testes. Não foi adicionada uma opção para desativar CDS apenas para escondê-lo.
 
@@ -353,6 +360,16 @@ Execute `mvnw.cmd verify` (ou `mvnw.cmd clean verify` para uma construção limp
 Esses arquivos são gerados em `target/` e não devem ser versionados. `mvnw.cmd test` coleta os dados, mas não alcança a fase `verify` que gera o relatório. Use o ciclo de vida Maven, e não apenas o objetivo isolado `surefire:test`, para preparar os agentes.
 
 A propriedade `sonar.coverage.jacoco.xmlReportPaths` aponta explicitamente para o XML. O CI já executa `clean verify` antes do objetivo Sonar; portanto, o relatório será produzido antes da importação. O Quality Gate da PR exige 80% de cobertura no código novo. A medição local de todo o projeto é uma referência, mas a confirmação desse critério depende da análise remota das linhas alteradas.
+
+### Validação das correções de revisão em 04/10/2026
+
+Após os ajustes, `mvnw.cmd verify` concluiu com 71 testes aprovados e geração do JAR e relatório JaCoCo. A cobertura local de produção foi de 218/235 linhas (92,77%) e 132/157 ramificações (84,08%). Não foram adicionadas exclusões de cobertura. A avaliação remota do código novo pelo Sonar ainda depende do envio das alterações.
+
+Os testes adicionais verificam 401/403 pelo MVC, concorrência por bloqueio e optimistic locking, preservação de cabeçalhos em 503, metadados seguros nos logs, respostas de segurança já enviadas e conflitos reais de CPF, CNPJ e dos dois responsáveis de PEV. As constraints são verificadas pelo nome retornado pelo PostgreSQL, sem modificar os scripts oficiais.
+
+Também foram tratados os seis apontamentos consultados no Sonar: a escolha de título deixou de usar ternário aninhado, o diagnóstico é calculado somente quando ERROR está habilitado e os três métodos vazios do controller de teste explicam por que não precisam executar lógica. O controller é uma fixture exclusiva dos testes.
+
+A integração dos handlers à cadeia de segurança permanece para a sprint de autenticação. Os logs brutos do Hibernate continuam desativados; o diagnóstico complementar registra somente metadados seguros. A documentação de métodos foi ampliada onde explica contratos e limites, sem tentar atingir uma porcentagem de comentários por meio de texto repetitivo.
 
 ## 12. Como evoluir esta infraestrutura
 
