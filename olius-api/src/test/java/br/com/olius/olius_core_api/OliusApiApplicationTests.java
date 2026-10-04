@@ -24,8 +24,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import static org.assertj.core.api.Assertions.*;
 
-//@EntityScan(basePackageClasses = FlushProbe.class)
-//@Testcontainers
+@EntityScan(basePackageClasses = FlushProbe.class)
+@Testcontainers
 @SpringBootTest(properties = {"spring.config.import=", "spring.jpa.open-in-view=false"})
 class OliusApiApplicationTests {
     @Container
