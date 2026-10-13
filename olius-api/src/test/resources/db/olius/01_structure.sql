@@ -463,6 +463,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     establishment_id UUID NOT NULL,
     subscription_cycle_id UUID NOT NULL,
+    idempotency_key UUID NOT NULL,
     approved_by UUID,
     approved_at TIMESTAMPTZ,
     admin_type user_type_t GENERATED ALWAYS AS ('ADMIN'::user_type_t) STORED,
@@ -493,7 +494,8 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     CONSTRAINT fk_request_arrival_driver FOREIGN KEY (arrival_driver_id)
         REFERENCES driver (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_request_service_accepted_by FOREIGN KEY (service_accepted_by)
-        REFERENCES establishment (id) ON UPDATE RESTRICT ON DELETE RESTRICT
+        REFERENCES establishment (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT uq_request_idempotency UNIQUE (establishment_id, idempotency_key)
 );
 
 COMMENT ON TABLE collection_request IS 'Reserva estimativa + uma vaga desde PENDING no ciclo de origem. Após coleta, não permitir cancelamento.';
@@ -581,8 +583,10 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     delivery_date TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     citizen_id UUID NOT NULL,
+    processing_order BIGINT NOT NULL,
     pev_id UUID NOT NULL,
     validated_by UUID NOT NULL,
+    idempotency_key UUID NOT NULL,
     record_status record_status_t NOT NULL DEFAULT 'RECORDED',
     revision INTEGER NOT NULL DEFAULT 1,
     corrected_at TIMESTAMPTZ,
@@ -590,6 +594,8 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     correction_reason TEXT,
     admin_type user_type_t GENERATED ALWAYS AS ('ADMIN'::user_type_t) STORED,
     CONSTRAINT uq_delivery_owner UNIQUE (id, citizen_id),
+    CONSTRAINT uq_delivery_order UNIQUE (citizen_id, processing_order),
+    CONSTRAINT uq_delivery_idempotency UNIQUE (idempotency_key),
     CONSTRAINT fk_delivery_citizen FOREIGN KEY (citizen_id)
         REFERENCES citizens (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     -- A FK preserva o vínculo mesmo se o PEV for inativado posteriormente.
@@ -701,6 +707,8 @@ COMMENT ON COLUMN collection_request.forfeited_volume_liters IS
 'Franquia perdida por cancelamento tardio; não representa óleo recolhido, pontos ou volume ambiental.';
 COMMENT ON COLUMN collection.processing_order IS
 'Ordem fixa por estabelecimento para reconstruir pontos e piso zero, independente da data física da visita.';
+COMMENT ON COLUMN delivery_pev.processing_order IS 
+'Ordem fixa por cidadão para reconstruir pontos e saldos, independente da data física da entrega. Atribuída sob bloqueio do cidadão e preservada nas correções.';
 COMMENT ON COLUMN point_calculation.revision IS
 'Revisão do cálculo, inclusive por correção de evento anterior; não precisa coincidir com a revisão da coleta.';
 
@@ -1300,3 +1308,62 @@ ALTER TABLE certificate_level_log
 
 ALTER TABLE certificate_log
     ADD CONSTRAINT uq_certificate_log_snapshot UNIQUE (audit_event_id, id, snapshot_kind);
+
+-- SESSÕES DE AUTENTICAÇÃO. Papéis e permissões: entrega data_catalog.
+
+CREATE TYPE auth_revocation_reason_t AS ENUM ('LOGOUT', 'ACCOUNT_INACTIVE', 'REFRESH_REUSE');
+
+CREATE TABLE auth_session (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    last_renewed_at TIMESTAMPTZ NOT NULL,
+    idle_expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    revocation_reason auth_revocation_reason_t,
+    updated_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT fk_auth_session_user FOREIGN KEY (user_id)
+        REFERENCES users (id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+COMMENT ON TABLE auth_session IS 'Login independente por dispositivo. Validade deriva do usuário ativo, prazo e revogação; não armazena JWT.';
+COMMENT ON COLUMN auth_session.last_renewed_at IS 'Login inicial ou última rotação bem-sucedida; consultas comuns não prorrogam a sessão.';
+
+CREATE TABLE auth_refresh_token (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL,
+    token_hash BYTEA NOT NULL,
+    generation BIGINT NOT NULL,
+    issued_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    CONSTRAINT uq_auth_refresh_hash UNIQUE (token_hash),
+    CONSTRAINT uq_auth_refresh_generation UNIQUE (session_id, generation),
+    CONSTRAINT fk_auth_refresh_session FOREIGN KEY (session_id)
+        REFERENCES auth_session (id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+COMMENT ON TABLE auth_refresh_token IS 'Histórico operacional imutável de hashes SHA-256; o segredo aleatório é gerado e entregue somente pela Core.';
+COMMENT ON COLUMN auth_refresh_token.expires_at IS 'Prazo congelado na emissão. Preservar tokens consumidos para detectar reutilização.';
+-- Garante no máximo um não consumido, não a validade atual desse token.
+CREATE UNIQUE INDEX uq_auth_refresh_unconsumed
+    ON auth_refresh_token (session_id) WHERE consumed_at IS NULL;
+
+CREATE TABLE auth_session_log (
+    LIKE auth_session,
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    audit_event_id UUID NOT NULL,
+    snapshot_kind audit_snapshot_t NOT NULL,
+    operation operation_status_t NOT NULL,
+    performed_at TIMESTAMPTZ NOT NULL,
+    performed_by UUID,
+    actor_kind audit_actor_t NOT NULL,
+    operational_driver_id UUID,
+    audit_reason TEXT,
+    changed_columns TEXT[] NOT NULL,
+    CONSTRAINT fk_auth_session_log_user FOREIGN KEY (performed_by)
+        REFERENCES users (id) ON DELETE RESTRICT,
+    CONSTRAINT uq_auth_session_log_snapshot UNIQUE (audit_event_id, id, snapshot_kind)
+);
+COMMENT ON TABLE auth_session_log IS 'Snapshots de sessão sem tokens/hashes. user_id é o titular; performed_by é o autor autenticado, quando houver.';
+
+-- Acesso público bloqueado; perfis são configurados na entrega data_catalog.
+REVOKE ALL ON auth_session, auth_refresh_token, auth_session_log FROM PUBLIC;

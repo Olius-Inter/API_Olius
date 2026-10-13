@@ -205,3 +205,10 @@ CREATE INDEX idx_certificate_level_log_history
 
 CREATE INDEX idx_certificate_log_history
     ON certificate_log (id, performed_at DESC);
+
+-- Sessões do titular, ordenadas para consulta e revogação em lote.
+CREATE INDEX idx_auth_session_user_created ON auth_session (user_id, created_at DESC);
+-- Apoia manutenção futura; expiração não depende de tarefa periódica.
+CREATE INDEX idx_auth_session_unrevoked_expiry ON auth_session (idle_expires_at)
+    WHERE revoked_at IS NULL;
+CREATE INDEX idx_auth_session_log_history ON auth_session_log (id, performed_at DESC);

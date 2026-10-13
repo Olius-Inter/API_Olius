@@ -1,0 +1,46 @@
+{
+  "source": "DB_Segundo/PostgreSQL",
+  "reviewed_at": "2026-10-08",
+  "files": [
+    {
+      "file": "01_structure.sql",
+      "sha256": "a5436190663eb396790eeb48f46c68dcea46b778fbba5c8662f7f447f2e6f279"
+    },
+    {
+      "file": "02_check_constraints.sql",
+      "sha256": "787e9f4addbe8fd41f4912fe13f7724c3f6e619683166c29c69466dd2f41c267"
+    },
+    {
+      "file": "03_indexes.sql",
+      "sha256": "386c24f58a1fe0bc04dcfe0cf857892c37a2f42f0069587ee39ca1c6d3e5d51d"
+    },
+    {
+      "file": "04_functions_procedures_window_functions.sql",
+      "sha256": "fcaa1ba7e1179c35d3eb49cf09cd78448759fd7c943a6ba41d13d9ed6e782207"
+    },
+    {
+      "file": "05_triggers.sql",
+      "sha256": "42bd33a22e516d5c2ae09c5ae1ca70f0f3bbe8ddd5b404ef59dce506a5dc025e"
+    },
+    {
+      "file": "access_control/01_roles.sql",
+      "sha256": "a3b6589865750f89cbc4321bdbcfd0b2d20d3fee5d980e858243ffa77b14ea97"
+    },
+    {
+      "file": "data_catalog/01_structure.sql",
+      "sha256": "1f752b3dc57c82db501d4593710fc9ec0592d3217a0ec23cca9fac1fbe61e84d"
+    },
+    {
+      "file": "data_catalog/02_check_constraints.sql",
+      "sha256": "ab26fb75435c4329dcca919e74a0425231f3d4b0f346a7125694ba11c1adc2a2"
+    },
+    {
+      "file": "data_catalog/03_view.sql",
+      "sha256": "f40f970068e88653e366ec8771b76aadda2dcf0be72c597b179bb69956c97126"
+    },
+    {
+      "file": "data_catalog/04_load.sql",
+      "sha256": "81efa8f77ea12c46598e5a13a7b5358e912f8c3c491ae48a0a8a26594f021112"
+    }
+  ]
+}

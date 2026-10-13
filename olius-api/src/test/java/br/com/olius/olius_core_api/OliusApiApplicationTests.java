@@ -5,17 +5,17 @@ import br.com.olius.olius_core_api.exception.enums.ApiErrorCode;
 import br.com.olius.olius_core_api.testfixture.FlushProbe;
 import jakarta.persistence.EntityManager;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
-import java.nio.charset.StandardCharsets;
+import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeAll;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.core.io.ClassPathResource;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -23,35 +23,21 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+
 import static org.assertj.core.api.Assertions.*;
 
-@EntityScan(basePackageClasses = FlushProbe.class)
+@EntityScan(basePackageClasses = {FlushProbe.class, br.com.olius.olius_core_api.entity.User.class})
 @Testcontainers
-@SpringBootTest(properties = {"spring.config.import=", "spring.jpa.open-in-view=false"})
+@SpringBootTest(properties = {"spring.config.import=", "spring.jpa.open-in-view=false", "olius.security.ephemeral-keys=true"})
 class OliusApiApplicationTests {
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16.15");
+    static final OfficialPostgres POSTGRES = new OfficialPostgres();
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) {
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         properties.add("spring.datasource.username", POSTGRES::getUsername);
         properties.add("spring.datasource.password", POSTGRES::getPassword);
-    }
-
-    @BeforeAll
-    static void installOfficialSchema() throws Exception {
-        try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(),
-                POSTGRES.getUsername(), POSTGRES.getPassword()); var statement = connection.createStatement()) {
-            statement.execute("CREATE SCHEMA test_support");
-            statement.execute("CREATE TABLE test_support.flush_probe (id uuid PRIMARY KEY, probe_value text UNIQUE)");
-            for (String script : new String[]{"01_structure.sql", "02_check_constraints.sql", "03_indexes.sql", "05_triggers.sql"}) {
-                String sql = new ClassPathResource("db/olius/" + script).getContentAsString(StandardCharsets.UTF_8);
-                // O driver PostgreSQL processa blocos dollar-quoted; não dividir o script por ponto e vírgula.
-                statement.execute(sql);
-            }
-        }
     }
 
     @Autowired EntityManager entityManager;
@@ -62,7 +48,7 @@ class OliusApiApplicationTests {
     @Test
     void contextLoadsAgainstOfficialSchema() {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'", Integer.class))
-                .isEqualTo(52);
+                .isEqualTo(58);
         assertThat(jdbc.queryForObject("SELECT current_database()", String.class)).isNotEqualTo("olius_dev");
     }
 
@@ -151,7 +137,7 @@ class OliusApiApplicationTests {
     @Test
     void serverCalculatedPointsViolationIsInternal() {
         Throwable failure = catchThrowable(() -> jdbc.update(
-                "INSERT INTO delivery_pev(oil_volume_liters,points_earned,delivery_date,citizen_id,pev_id,validated_by) VALUES (3.7,99,CURRENT_TIMESTAMP,?,?,?)",
+                "INSERT INTO delivery_pev(oil_volume_liters,points_earned,delivery_date,citizen_id,pev_id,validated_by,idempotency_key,processing_order) VALUES (3.7,99,CURRENT_TIMESTAMP,?,?,?,gen_random_uuid(),1)",
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()));
         assertThat(findSql(failure).getSQLState()).isEqualTo("23514");
         assertThat(translator.translate(failure)).isEqualTo(ApiErrorCode.INTERNAL_ERROR);
