@@ -63,6 +63,7 @@ public class ApiProblemFactory {
             case NOT_ACCEPTABLE -> HttpStatus.NOT_ACCEPTABLE;
             case INTERNAL_ERROR -> HttpStatus.INTERNAL_SERVER_ERROR;
             case SERVICE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+            case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
         };
     }
 
@@ -85,6 +86,7 @@ public class ApiProblemFactory {
             case UNSUPPORTED_MEDIA_TYPE -> "Formato não suportado";
             case NOT_ACCEPTABLE -> "Formato de resposta não disponível";
             case SERVICE_UNAVAILABLE -> "Serviço indisponível";
+            case TOO_MANY_REQUESTS -> "Muitas requisições";
             case INTERNAL_SERVER_ERROR -> "Erro interno";
             default -> standard.getReasonPhrase();
         };
@@ -108,6 +110,7 @@ public class ApiProblemFactory {
             case NOT_ACCEPTABLE -> "Não há uma representação disponível no formato solicitado.";
             case HTTP_REQUEST_ERROR -> "Não foi possível atender à requisição.";
             case SERVICE_UNAVAILABLE -> "O serviço está temporariamente indisponível.";
+            case RATE_LIMITED -> "Aguarde antes de tentar novamente.";
             case INTERNAL_ERROR -> "Não foi possível concluir a operação. Informe o identificador do erro ao suporte.";
         };
     }
