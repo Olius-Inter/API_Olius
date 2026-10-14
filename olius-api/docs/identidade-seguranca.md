@@ -226,3 +226,15 @@ O `.env` existente e as credenciais nele foram preservados. O arquivo não é li
 
 
 A seleção e o isolamento dos arquivos de perfil são verificados por `ProfileConfigurationTest`, sem banco: local usa CONTAINER_DEV_*, prod usa DB_* sem importar `.env`, e a configuração comum não seleciona banco. A execução completa com Testcontainers continua exigindo Docker disponível.
+
+
+### Revisão CSRF e análise estática da PR #9
+
+A regra Sonar `java:S4502` sinaliza qualquer chamada a `requireCsrfProtectionMatcher`, mesmo quando restringe a verificação a operações com autenticação por cookie. A política foi revisada: login, refresh e logout sob `/api/v1/auth/web/**` exigem CSRF em métodos de escrita; as outras operações não autenticam por cookie, HTTP Basic ou HttpSession, exigindo Bearer explícito ou credenciais/refresh no JSON. CORS não é usado como substituto dessa proteção.
+
+A exceção de análise estática está limitada ao método `SecurityConfiguration.browserCsrf`, com justificativa no código, sem exclusões globais ou desativação do CSRF. Os testes HTTP verificam token ausente/incorreto, caminho codificado, logout Web mesmo com Bearer válido e renovação Web com cookie. Novas rotas que autentiquem por cookie precisam entrar na proteção CSRF e em testes correspondentes; não devem ser adicionadas implicitamente às exceções.
+
+
+O filtro padrão `BearerTokenAuthenticationFilter` é registrado explicitamente com `JwtAuthenticationProvider`, o decoder e `SessionJwtConverter`. Isso mantém assinatura, claims e consulta de sessão existentes, sem a dispensa automática de CSRF por Bearer adicionada pela DSL de Resource Server. Assim, ter um JWT válido não dispensa o token CSRF em operações Web. Não foi criado um parser JWT próprio.
+
+Validação das correções da PR #9 em 14/10/2026: `mvnw -o verify` concluiu com BUILD SUCCESS, 105 testes executados, nenhuma falha, nenhum erro e nenhum teste ignorado, com JAR e relatório JaCoCo gerados. A opção offline utiliza o cache Maven e não evita os testes HTTP ou o PostgreSQL descartável do Testcontainers. A análise remota do Sonar depende de novo commit/push; não foi simulada como aprovada localmente.
