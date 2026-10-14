@@ -21,7 +21,12 @@ public class ProfileService {
     public Profile get(UUID target,UUID actor,UserType role) {
         if(!target.equals(actor) && role!=UserType.ADMIN) throw new AccessDeniedException("Titularidade inválida");
         User u=users.findById(target).orElseThrow(ResourceNotFoundException::new);
-        String cpf=null,cnpj=null,qr=null,description=null; UUID type=null; AddressView address=null;
+        String cpf=null;
+        String cnpj=null;
+        String qr=null;
+        String description=null;
+        UUID type=null;
+        AddressView address=null;
         if(u.getUserType()==UserType.CITIZENS) {
             Citizen c=citizens.findById(target).orElseThrow(IllegalStateException::new);
             cpf=c.getCpf(); qr=c.getQrToken();
@@ -33,7 +38,7 @@ public class ProfileService {
                 a.getNumber(),a.getCep(),a.getComplement(),a.getLatitude(),a.getLongitude());
         }
         return new Profile(u.getId(),u.getName(),u.getEmail(),u.getUserType(),u.getStatus(),u.getCreatedAt(),
-            telephones.findByUserIdOrderByTelephone(target).stream().map(Telephone::getTelephone).toList(),
+            telephones.findByUserIdOrderByNumber(target).stream().map(Telephone::getNumber).toList(),
             cpf,cnpj,qr,type,description,address);
     }
 }

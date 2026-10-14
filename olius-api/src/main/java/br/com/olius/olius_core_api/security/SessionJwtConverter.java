@@ -13,7 +13,8 @@ public class SessionJwtConverter implements Converter<Jwt,AbstractAuthentication
     private final AuthSessionRepository sessions;
     public SessionJwtConverter(AuthSessionRepository sessions) { this.sessions=sessions; }
     @Override public AbstractAuthenticationToken convert(Jwt jwt) {
-        UUID userId,sessionId;
+        UUID userId;
+        UUID sessionId;
         try { userId=UUID.fromString(jwt.getSubject()); sessionId=UUID.fromString(jwt.getClaimAsString("sid")); }
         catch(IllegalArgumentException | NullPointerException invalid) { throw new BadCredentialsException("Claims inválidas"); }
         var state=sessions.status(userId,sessionId);

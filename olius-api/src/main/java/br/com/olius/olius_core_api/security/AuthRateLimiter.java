@@ -6,7 +6,9 @@ import java.util.Map;
 public class AuthRateLimiter {
     private record Window(long started,int count) { }
     private final Map<String,Window> windows=new HashMap<>();
-    private final int limit; private final int capacity; private final Clock clock;
+    private final int limit;
+    private final int capacity;
+    private final Clock clock;
 
     public AuthRateLimiter(int limit,int capacity,Clock clock) {
         if(limit<1 || capacity<1) throw new IllegalArgumentException("Limites técnicos devem ser positivos");
@@ -14,7 +16,8 @@ public class AuthRateLimiter {
     }
 
     public synchronized boolean allow(String ip) {
-        long now=clock.millis(); Window old=windows.get(ip);
+        long now=clock.millis();
+        Window old=windows.get(ip);
         if(old!=null && now-old.started()<60000) {
             if(old.count()>=limit) return false;
             windows.put(ip,new Window(old.started(),old.count()+1)); return true;

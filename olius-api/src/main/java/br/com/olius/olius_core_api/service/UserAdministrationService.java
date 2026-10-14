@@ -8,7 +8,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UserAdministrationService {
-    private final JdbcTemplate jdbc; private final AuditContext audit;
+    private final JdbcTemplate jdbc;
+    private final AuditContext audit;
     public UserAdministrationService(JdbcTemplate jdbc,AuditContext audit) { this.jdbc=jdbc; this.audit=audit; }
     @Transactional
     @PreAuthorize("hasRole('ADMIN')")

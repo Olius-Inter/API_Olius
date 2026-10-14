@@ -12,7 +12,9 @@ import org.springframework.stereotype.Component;
 @Component @ConditionalOnProperty(name="olius.admin-bootstrap.enabled",havingValue="true")
 public class FirstAdminRunner implements ApplicationRunner {
     private static final Logger LOG=LoggerFactory.getLogger(FirstAdminRunner.class);
-    private final FirstAdminService service; private final Environment env; private final ConfigurableApplicationContext context;
+    private final FirstAdminService service;
+    private final Environment env;
+    private final ConfigurableApplicationContext context;
     public FirstAdminRunner(FirstAdminService service,Environment env,ConfigurableApplicationContext context) {
         this.service=service; this.env=env; this.context=context;
     }

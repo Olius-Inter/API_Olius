@@ -205,6 +205,11 @@ class IdentitySecurityIntegrationTest {
         String refreshHeader=logged.getResponse().getHeader("Set-Cookie");
         assertThat(refreshHeader).contains("HttpOnly","Secure","SameSite=Strict","Path=/api/v1/auth/web");
         Cookie refresh=logged.getResponse().getCookie("olius_refresh"); assertThat(refresh).isNotNull();
+        String webAccess=json.readTree(logged.getResponse().getContentAsString()).get("accessToken").asText();
+        mvc.perform(post("/api/v1/auth/web/logout").cookie(refresh).header("Authorization","Bearer "+webAccess))
+            .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/auth/web/login").cookie(csrfCookie).header("X-XSRF-TOKEN","invalid")
+            .contentType(MediaType.APPLICATION_JSON).content(credentials)).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/auth/web/refresh").cookie(refresh)).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/auth/web/refresh").cookie(refresh,csrfCookie).header("X-XSRF-TOKEN",csrfToken))
             .andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist());
@@ -254,7 +259,8 @@ class IdentitySecurityIntegrationTest {
         String initialEmail=email();
         UUID initial=firstAdmin.provision(new AdminRegistration("Inicial",initialEmail,PASSWORD));
         assertThat(initial).isNotNull(); assertThat(login(initialEmail).access()).isNotBlank();
-        assertThatThrownBy(() -> firstAdmin.provision(new AdminRegistration("Admin",email(),PASSWORD)))
+        var anotherAdmin = new AdminRegistration("Admin",email(),PASSWORD);
+        assertThatThrownBy(() -> firstAdmin.provision(anotherAdmin))
             .isInstanceOf(IllegalStateException.class);
     }
 
@@ -279,8 +285,8 @@ class IdentitySecurityIntegrationTest {
     }
     private Account administrator() {
         UUID id=UUID.randomUUID(); String email=email();
-        var encoder=new org.springframework.security.crypto.argon2.Argon2PasswordEncoder(16,32,1,19456,2);
-        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,?,'ADMIN')",id,email,encoder.encode(PASSWORD));
+        var passwordEncoder=new org.springframework.security.crypto.argon2.Argon2PasswordEncoder(16,32,1,19456,2);
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,?,'ADMIN')",id,email,passwordEncoder.encode(PASSWORD));
         return new Account(id,email);
     }
     private JdbcTemplate admin() {

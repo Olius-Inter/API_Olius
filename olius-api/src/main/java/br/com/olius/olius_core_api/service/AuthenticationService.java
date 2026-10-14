@@ -18,9 +18,12 @@ public class AuthenticationService {
     public record Tokens(Access access,String refresh,Instant refreshExpiresAt) {
         @Override public String toString() { return "Tokens[redacted]"; }
     }
-    private final UserRepository users; private final PasswordEncoder passwords;
-    private final SessionTransactions sessions; private final SecretTokens secrets;
-    private final JwtEncoder encoder; private final SecurityProperties properties;
+    private final UserRepository users;
+    private final PasswordEncoder passwords;
+    private final SessionTransactions sessions;
+    private final SecretTokens secrets;
+    private final JwtEncoder encoder;
+    private final SecurityProperties properties;
     private final String dummyHash;
     public AuthenticationService(UserRepository users,PasswordEncoder passwords,SessionTransactions sessions,
         SecretTokens secrets,JwtEncoder encoder,SecurityProperties properties) {
@@ -45,7 +48,8 @@ public class AuthenticationService {
     }
     private Tokens issue(Outcome outcome,String refresh) {
         if(!"OK".equals(outcome.code())) throw new BadCredentialsException("Sessão inválida");
-        Instant now=Instant.now(); Instant expiry=now.plusSeconds(900);
+        Instant now=Instant.now();
+        Instant expiry=now.plusSeconds(900);
         JwtClaimsSet claims=JwtClaimsSet.builder().issuer(properties.getIssuer())
             .audience(java.util.List.of(properties.getAudience())).subject(outcome.userId().toString())
             .id(java.util.UUID.randomUUID().toString()).issuedAt(now).expiresAt(expiry)

@@ -26,10 +26,15 @@ public class Address {
     @Column(length=150) private String complement;
     @Column(precision=9, scale=6) private BigDecimal latitude;
     @Column(precision=9, scale=6) private BigDecimal longitude;
-    public Address(UUID id, String state, String city, String neighborhood, String street,
-                   String number, String cep, String complement, BigDecimal latitude, BigDecimal longitude) {
-        this.id=id; ownerKind=OwnerKind.ESTABLISHMENT; this.state=state; this.city=city;
-        this.neighborhood=neighborhood; this.street=street; this.number=number; this.cep=cep;
-        this.complement=complement; this.latitude=latitude; this.longitude=longitude;
+    public record PostalDetails(String state, String city, String neighborhood, String street,
+                                String number, String cep, String complement) { }
+    public record Coordinates(BigDecimal latitude, BigDecimal longitude) { }
+
+    public Address(UUID id, PostalDetails postal, Coordinates coordinates) {
+        this.id=id;
+        ownerKind=OwnerKind.ESTABLISHMENT;
+        state=postal.state(); city=postal.city(); neighborhood=postal.neighborhood();
+        street=postal.street(); number=postal.number(); cep=postal.cep(); complement=postal.complement();
+        latitude=coordinates.latitude(); longitude=coordinates.longitude();
     }
 }

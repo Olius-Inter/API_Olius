@@ -1,6 +1,7 @@
 package br.com.olius.olius_core_api.config;
 import com.nimbusds.jose.jwk.*;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,7 +27,7 @@ public class CryptographyConfiguration {
         // Argon2id
         return new Argon2PasswordEncoder(16,32,1,19456,2);
     }
-    @Bean public KeyPair jwtKeys(SecurityProperties properties) throws Exception {
+    @Bean public KeyPair jwtKeys(SecurityProperties properties) throws GeneralSecurityException, IOException {
         if(properties.isEphemeralKeys()) {
             LOG.warn("Chaves JWT efêmeras habilitadas: reiniciar invalida tokens. Uso exclusivo local/teste.");
             KeyPairGenerator generator=KeyPairGenerator.getInstance("RSA"); generator.initialize(2048);
@@ -44,7 +45,7 @@ public class CryptographyConfiguration {
             throw new IllegalStateException("Par de chaves RSA inválido");
         return new KeyPair(publicKey,privateKey);
     }
-    private byte[] pem(String path,String kind) throws Exception {
+    private byte[] pem(String path,String kind) throws IOException {
         String text=Files.readString(Path.of(path),StandardCharsets.US_ASCII)
             .replace("-----BEGIN "+kind+"-----","").replace("-----END "+kind+"-----","")
             .replaceAll("\\s","");

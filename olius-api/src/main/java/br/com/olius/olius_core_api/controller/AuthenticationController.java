@@ -11,7 +11,9 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
 @RestController @RequestMapping("/api/v1/auth")
 public class AuthenticationController {
-    private final AuthenticationService auth; private final SessionTransactions sessions; private final RefreshCookies cookies;
+    private final AuthenticationService auth;
+    private final SessionTransactions sessions;
+    private final RefreshCookies cookies;
     public AuthenticationController(AuthenticationService auth,SessionTransactions sessions,RefreshCookies cookies) {
         this.auth=auth; this.sessions=sessions; this.cookies=cookies;
     }

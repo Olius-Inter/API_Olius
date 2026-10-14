@@ -17,7 +17,8 @@ class CryptographyConfigurationTest {
         var persistent=new SecurityProperties(); persistent.setPrivateKeyPath(privatePath.toString()); persistent.setPublicKeyPath(publicPath.toString());
         var loaded=config.jwtKeys(persistent); assertThat(loaded.getPublic().getEncoded()).isEqualTo(keys.getPublic().getEncoded());
         assertThat(loaded.getPrivate().getEncoded()).isEqualTo(keys.getPrivate().getEncoded());
-        assertThatThrownBy(() -> config.jwtKeys(new SecurityProperties())).isInstanceOf(IllegalStateException.class);
+        var missingKeys = new SecurityProperties();
+        assertThatThrownBy(() -> config.jwtKeys(missingKeys)).isInstanceOf(IllegalStateException.class);
     }
     private String pem(String kind,byte[] bytes) {
         return "-----BEGIN "+kind+"-----\n"+Base64.getEncoder().encodeToString(bytes)+"\n-----END "+kind+"-----\n";

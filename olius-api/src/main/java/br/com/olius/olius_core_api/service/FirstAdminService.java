@@ -10,8 +10,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 @Service
 public class FirstAdminService {
-    private final EntityManager em; private final JdbcTemplate jdbc; private final AuditContext audit;
-    private final PasswordEncoder passwords; private final Validator validator;
+    private final EntityManager em;
+    private final JdbcTemplate jdbc;
+    private final AuditContext audit;
+    private final PasswordEncoder passwords;
+    private final Validator validator;
     public FirstAdminService(EntityManager em,JdbcTemplate jdbc,AuditContext audit,PasswordEncoder passwords,Validator validator) {
         this.em=em; this.jdbc=jdbc; this.audit=audit; this.passwords=passwords; this.validator=validator;
     }

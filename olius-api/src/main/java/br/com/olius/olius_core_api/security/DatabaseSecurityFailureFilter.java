@@ -10,7 +10,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 /** Falhas do banco durante autenticação ocorrem antes do ControllerAdvice. */
 public class DatabaseSecurityFailureFilter extends OncePerRequestFilter {
-    private final ApiProblemFactory factory; private final PersistenceExceptionTranslator translator;
+    private final ApiProblemFactory factory;
+    private final PersistenceExceptionTranslator translator;
     private final ObjectMapper mapper;
     public DatabaseSecurityFailureFilter(ApiProblemFactory factory,PersistenceExceptionTranslator translator,ObjectMapper mapper) {
         this.factory=factory; this.translator=translator; this.mapper=mapper;

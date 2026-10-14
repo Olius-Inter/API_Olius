@@ -36,9 +36,12 @@ public class RegistrationService {
     public Registration establishment(EstablishmentRegistration request) {
         if(!types.existsById(request.typeId())) throw new ResourceNotFoundException();
         UUID id=createUser(request.name(),request.email(),request.password(),UserType.ESTABLISHMENT);
-        String qr=qr(id,UserType.ESTABLISHMENT); var a=request.address(); UUID addressId=UUID.randomUUID();
-        em.persist(new Address(addressId,a.state(),a.city(),a.neighborhood(),a.street(),a.number(),a.cep(),
-            a.complement(),a.latitude(),a.longitude())); em.flush();
+        String qr=qr(id,UserType.ESTABLISHMENT);
+        var a=request.address();
+        UUID addressId=UUID.randomUUID();
+        em.persist(new Address(addressId,
+            new Address.PostalDetails(a.state(),a.city(),a.neighborhood(),a.street(),a.number(),a.cep(),a.complement()),
+            new Address.Coordinates(a.latitude(),a.longitude()))); em.flush();
         em.persist(new Establishment(id,request.cnpj(),qr,request.description(),request.typeId(),addressId));
         phones(id,request.telephones()); em.flush();
         return new Registration(id,UserType.ESTABLISHMENT);

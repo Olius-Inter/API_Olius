@@ -4,7 +4,8 @@ import java.util.Locale;
 public final class EmailAddress {
     private EmailAddress() { }
     public static String normalize(String email) {
-        String value=email.strip(); int at=value.lastIndexOf('@');
+        String value=email.strip();
+        int at=value.lastIndexOf('@');
         return at<0 ? value : value.substring(0,at+1)+value.substring(at+1).toLowerCase(Locale.ROOT);
     }
 }

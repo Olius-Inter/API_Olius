@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 @Repository
 public class AuthSessionRepository {
+    private static final String EXPIRES_AT = "expires_at";
     public record Outcome(String code,UUID sessionId,UUID userId,Instant expiresAt) { }
     public record State(boolean valid,UserType type,Instant expiresAt) { }
     private final JdbcTemplate jdbc;
@@ -13,13 +14,13 @@ public class AuthSessionRepository {
     public Outcome open(UUID userId,byte[] hash) {
         return jdbc.queryForObject("SELECT * FROM open_auth_session(?,?)",(rs,row) ->
             new Outcome(rs.getString("result_code"),rs.getObject("session_id",UUID.class),userId,
-                rs.getTimestamp("expires_at")==null ? null : rs.getTimestamp("expires_at").toInstant()),userId,hash);
+                rs.getTimestamp(EXPIRES_AT)==null ? null : rs.getTimestamp(EXPIRES_AT).toInstant()),userId,hash);
     }
     public Outcome rotate(byte[] current,byte[] next) {
         return jdbc.queryForObject("SELECT * FROM rotate_auth_refresh_token(?,?)",(rs,row) ->
             new Outcome(rs.getString("result_code"),rs.getObject("session_id",UUID.class),
-                rs.getObject("user_id",UUID.class),rs.getTimestamp("expires_at")==null ? null :
-                rs.getTimestamp("expires_at").toInstant()),current,next);
+                rs.getObject("user_id",UUID.class),rs.getTimestamp(EXPIRES_AT)==null ? null :
+                rs.getTimestamp(EXPIRES_AT).toInstant()),current,next);
     }
     public State status(UUID userId,UUID sessionId) {
         return jdbc.queryForObject("SELECT * FROM get_auth_session_status(?,?)",(rs,row) ->

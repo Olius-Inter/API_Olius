@@ -8,7 +8,12 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
+import org.springframework.security.web.authentication.AuthenticationEntryPointFailureHandler;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -22,7 +27,7 @@ public class SecurityConfiguration {
     }
     @Bean public SecurityFilterChain security(HttpSecurity http,SecurityProperties properties,
         SessionJwtConverter converter,ProblemAuthenticationEntryPoint entry,ProblemAccessDeniedHandler denied,
-        ApiProblemFactory factory,PersistenceExceptionTranslator translator,ObjectMapper mapper,AuthRateLimiter limiter) throws Exception {
+        ApiProblemFactory factory,PersistenceExceptionTranslator translator,ObjectMapper mapper,AuthRateLimiter limiter,JwtDecoder decoder) throws Exception {
         var csrf=new CookieCsrfTokenRepository();
         csrf.setCookiePath("/api/v1/auth/web");
         csrf.setCookieCustomizer(cookie -> cookie.httpOnly(true).secure(properties.isCookieSecure())
@@ -30,10 +35,15 @@ public class SecurityConfiguration {
         if(!List.of("Strict","Lax","None").contains(properties.getCookieSameSite())
             || ("None".equals(properties.getCookieSameSite()) && !properties.isCookieSecure()))
             throw new IllegalStateException("Configuração de cookie inválida");
+        var provider = new JwtAuthenticationProvider(decoder);
+        provider.setJwtAuthenticationConverter(converter);
+        var bearer = new BearerTokenAuthenticationFilter(new ProviderManager(provider));
+        bearer.setAuthenticationEntryPoint(entry);
+        bearer.setAuthenticationFailureHandler(new AuthenticationEntryPointFailureHandler(entry));
+        // Register the standard JWT filter explicitly: resource-server DSL adds an
+        // automatic CSRF exemption for all Bearer requests, including web logout.
         http.cors(cors -> cors.configurationSource(cors(properties)))
-            .csrf(config -> config.csrfTokenRepository(csrf)
-                .requireCsrfProtectionMatcher(request -> PathPatternRequestMatcher.withDefaults().matcher("/api/v1/auth/web/**").matches(request)
-                    && !List.of("GET","HEAD","OPTIONS").contains(request.getMethod())))
+            .csrf(config -> browserCsrf(config, csrf))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .requestCache(cache -> cache.disable()).formLogin(form -> form.disable())
             .httpBasic(basic -> basic.disable()).logout(logout -> logout.disable())
@@ -45,12 +55,26 @@ public class SecurityConfiguration {
                     "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
-            .oauth2ResourceServer(resource -> resource.jwt(jwt -> jwt.jwtAuthenticationConverter(converter))
-                .authenticationEntryPoint(entry).accessDeniedHandler(denied))
+            .addFilterAt(bearer, BearerTokenAuthenticationFilter.class)
             .addFilterBefore(new DatabaseSecurityFailureFilter(factory,translator,mapper),BearerTokenAuthenticationFilter.class)
             .addFilterBefore(new AuthRateLimitFilter(limiter,factory,mapper),BearerTokenAuthenticationFilter.class);
         return http.build();
     }
+    /**
+     * Cookie-authenticated web operations always require CSRF. Other operations do
+     * not consume authentication cookies: they require an explicit Bearer token,
+     * credentials or a refresh secret in JSON. HTTP sessions/basic auth are disabled.
+     * S4502 flags any custom CSRF matcher; this narrowly reviewed policy is covered
+     * by real filter-chain tests, including encoded paths and missing/invalid CSRF.
+     */
+    @SuppressWarnings("java:S4502")
+    private void browserCsrf(CsrfConfigurer<HttpSecurity> config, CookieCsrfTokenRepository repository) {
+        var web = PathPatternRequestMatcher.withDefaults().matcher("/api/v1/auth/web/**");
+        config.csrfTokenRepository(repository)
+            .requireCsrfProtectionMatcher(request -> web.matches(request)
+                && !List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod()));
+    }
+
     private CorsConfigurationSource cors(SecurityProperties properties) {
         var config=new CorsConfiguration(); config.setAllowedOrigins(properties.getAllowedOrigins());
         config.setAllowCredentials(true); config.setAllowedMethods(List.of("GET","POST","PATCH","DELETE","OPTIONS"));

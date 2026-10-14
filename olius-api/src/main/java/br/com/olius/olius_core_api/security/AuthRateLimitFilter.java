@@ -16,7 +16,9 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/*/login"),
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/*/refresh"),
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/registrations/*"));
-    private final AuthRateLimiter limiter; private final ApiProblemFactory factory; private final ObjectMapper mapper;
+    private final AuthRateLimiter limiter;
+    private final ApiProblemFactory factory;
+    private final ObjectMapper mapper;
     public AuthRateLimitFilter(AuthRateLimiter limiter,ApiProblemFactory factory,ObjectMapper mapper) {
         this.limiter=limiter; this.factory=factory; this.mapper=mapper;
     }

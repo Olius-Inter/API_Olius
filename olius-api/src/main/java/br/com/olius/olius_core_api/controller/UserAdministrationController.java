@@ -12,7 +12,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 @RestController @RequestMapping("/api/v1/admin/users") @PreAuthorize("hasRole('ADMIN')")
 public class UserAdministrationController {
-    private final RegistrationService registrations; private final UserAdministrationService users;
+    private final RegistrationService registrations;
+    private final UserAdministrationService users;
     public UserAdministrationController(RegistrationService registrations,UserAdministrationService users) {
         this.registrations=registrations; this.users=users;
     }

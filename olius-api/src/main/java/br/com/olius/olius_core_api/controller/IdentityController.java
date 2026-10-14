@@ -13,8 +13,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 @RestController @RequestMapping("/api/v1")
 public class IdentityController {
-    private final RegistrationService registrations; private final ProfileService profiles;
-    private final EstablishmentTypeRepository types; private final AuthSessionRepository sessions;
+    private final RegistrationService registrations;
+    private final ProfileService profiles;
+    private final EstablishmentTypeRepository types;
+    private final AuthSessionRepository sessions;
     public IdentityController(RegistrationService registrations,ProfileService profiles,
         EstablishmentTypeRepository types,AuthSessionRepository sessions) {
         this.registrations=registrations; this.profiles=profiles; this.types=types; this.sessions=sessions;
@@ -35,7 +37,9 @@ public class IdentityController {
     }
     /** A segunda API encaminha o JWT do usuário; a Core verifica sub/sid e o estado atual. */
     @GetMapping("/auth/session") public SessionIdentity session(Authentication auth) {
-        var id=Caller.id(auth); var sid=Caller.session(auth); var state=sessions.status(id,sid);
+        var id=Caller.id(auth);
+        var sid=Caller.session(auth);
+        var state=sessions.status(id,sid);
         if(!state.valid()) throw new org.springframework.security.authentication.BadCredentialsException("Sessão inválida");
         return new SessionIdentity(id,sid,state.type(),state.expiresAt());
     }

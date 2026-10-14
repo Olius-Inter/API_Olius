@@ -4,5 +4,5 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 public interface TelephoneRepository extends JpaRepository<Telephone, UUID> {
-    List<Telephone> findByUserIdOrderByTelephone(UUID userId);
+    List<Telephone> findByUserIdOrderByNumber(UUID userId);
 }
