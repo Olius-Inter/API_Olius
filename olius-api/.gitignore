@@ -34,3 +34,10 @@ build/
 
 ### Git ###
 .env
+# Chaves privadas e arquivos de credenciais locais
+*.pem
+*.key
+.env.*
+!.env.example
+
+/secrets/
