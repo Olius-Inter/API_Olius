@@ -1,3 +1,5 @@
+Estado atual: veja [Segurança da Core API](identidade-seguranca.md). Os resultados datados abaixo preservam o histórico da versão então testada.
+
 # Tratamento de erros da Core API
 
 Este documento explica como a API comunica operações rejeitadas e falhas técnicas aos seus consumidores, como aplicações Web e Mobile. Não é necessário conhecer as regras de negócio do projeto para entender o fluxo.
@@ -232,30 +234,30 @@ Os testes estão em `src/test/java/br/com/olius/olius_core_api`:
 | `exception/SafeExceptionDiagnosticTest` | SQLSTATE encadeado, proteção contra ciclos e rejeição de conteúdo arbitrário. |
 | `exception/PersistenceExceptionTranslatorTest` | Metadados conhecidos, causas encadeadas, concorrência, indisponibilidade e fallback conservador. |
 | `security/ProblemSecurityHandlersTest` | Serialização das respostas 401/403, cabeçalhos e resposta já enviada. Não percorre a cadeia completa de segurança. |
-| `OliusApiApplicationTests` | Integração com PostgreSQL, estrutura de 52 tabelas públicas, duplicidade de e-mail, telefone, CPF, CNPJ e dos dois tipos de responsável de PEV, auditoria, CHECKs e falhas de flush/commit. |
+| `OliusApiApplicationTests` | Integração com PostgreSQL, estrutura de 58 tabelas públicas (55 da aplicação e 3 do catálogo), duplicidade de e-mail, telefone, CPF, CNPJ e dos dois tipos de responsável de PEV, auditoria, CHECKs e falhas de flush/commit. |
 | `testfixture/FlushProbe` | Entidade exclusiva de teste para provocar falha real de persistência JPA. |
 
 ### Funcionamento previsto
 
 1. A extensão JUnit do Testcontainers inicia `postgres:16.15`.
 2. `@DynamicPropertySource` informa ao Spring URL, usuário e senha do container.
-3. `@SpringBootTest` carrega o contexto; nesse teste, a importação do `.env` é desativada.
-4. `@BeforeAll` cria as estruturas auxiliares e executa os quatro scripts, na ordem abaixo.
+3. `OfficialPostgres.start()` instala o schema, as rotinas e as permissões antes de disponibilizar a conexão ao Spring.
+4. `@SpringBootTest` carrega o contexto; nesse teste, a importação do `.env` é desativada. Consulte `identidade-seguranca.md`.
 5. Os testes verificam o comportamento real do banco e sua tradução.
 6. O container é encerrado e descartado pelo gerenciamento do Testcontainers.
 
-O contexto é carregado antes de `@BeforeAll`. Ao introduzir entidades de produção, será necessário revisar essa ordem e o escaneamento JPA para que `ddl-auto=validate` não tente validar tabelas ainda não criadas. A preparação atual não deve ser expandida indiscriminadamente para todas as entidades futuras.
+A preparação foi antecipada para a inicialização do container. O teste de erros escaneia a fixture FlushProbe e as entidades de cadastro; o schema já existe quando ddl-auto=validate é executado.
 
 ### Configuração e validação em 04/10/2026
 
 As anotações de preparação estão ativas em `OliusApiApplicationTests`:
 
 ```java
-@EntityScan(basePackageClasses = FlushProbe.class)
+@EntityScan(basePackageClasses = {FlushProbe.class, User.class})
 @Testcontainers
 ```
 
-`@Testcontainers` habilita a extensão JUnit que gerencia o container declarado com `@Container`. Não é necessária uma chamada manual a `POSTGRES.start()` nesse fluxo. `@EntityScan` limita a descoberta de entidades ao pacote da fixture `FlushProbe`, mantendo as entidades de produção fora desse teste específico.
+`@Testcontainers` habilita a extensão JUnit que gerencia o container declarado com `@Container`. Não é necessária uma chamada manual a `POSTGRES.start()` nesse fluxo. `@EntityScan` inclui a fixture `FlushProbe` e as entidades de cadastro atuais, validadas contra o schema já instalado.
 
 A execução local de `mvnw.cmd verify`, com Java 21 Temurin e Docker Desktop, concluiu com **BUILD SUCCESS**: **71 testes executados, nenhuma falha, nenhum erro e nenhum teste ignorado**.
 
@@ -279,13 +281,15 @@ Local: `src/test/resources/db/olius/`.
 1. `01_structure.sql`: tabelas e objetos estruturais.
 2. `02_check_constraints.sql`: restrições de validação do banco.
 3. `03_indexes.sql`: índices.
-4. `05_triggers.sql`: triggers e funções associadas.
+4. `04_functions_procedures_window_functions.sql`: functions e procedures, incluindo sessões.
+5. `05_triggers.sql`: triggers e funções associadas.
+6. `data_catalog/01` a `04` e `access_control/01_roles.sql`: catálogo e permissões.
 
-São cópias utilizadas como recursos de teste. O método `installOfficialSchema` lê e executa os arquivos com JDBC, preservando os blocos SQL completos. Não são migrations nem scripts executados na inicialização normal da API. O arquivo de functions/procedures incompleto e o catálogo de dados não integram essa lista.
+São cópias utilizadas como recursos de teste. A fixture `OfficialPostgres` lê e executa os arquivos com JDBC antes do contexto Spring, preservando os blocos SQL completos. Não são migrations nem scripts executados na inicialização normal da API. O script 04 está finalizado e integra a preparação atual.
 
 Há estruturas auxiliares exclusivas dos testes: schema `test_support`, tabela `flush_probe` e tabela temporária `commit_probe`. Não representam novas entidades de negócio.
 
-Quando os scripts oficiais mudarem, as cópias precisam ser sincronizadas e os testes revisados, inclusive a expectativa de 52 tabelas. A existência de tabelas de auditoria não basta para preenchê-las: são necessárias as rotinas e o contexto de execução adequados.
+Quando os scripts oficiais mudarem, as cópias precisam ser sincronizadas e os testes revisados, inclusive a expectativa atual de 58 tabelas em public. A existência de tabelas de auditoria não basta para preenchê-las: são necessárias as rotinas e o contexto de execução adequados.
 
 ## 11. Relação com o CI e execução local
 
