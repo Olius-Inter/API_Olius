@@ -530,6 +530,12 @@ ALTER TABLE delivery_pev
     ADD CONSTRAINT ck_delivery_pev_dates
     CHECK (isfinite(delivery_date) AND isfinite(created_at) AND delivery_date <= created_at);
 
+-- A ordem B2C é positiva e independente da data física da entrega.
+-- A atribuição e a preservação da ordem dependem das rotinas.
+ALTER TABLE delivery_pev
+    ADD CONSTRAINT ck_delivery_pev_order
+    CHECK (processing_order > 0);
+
 -- Correções de coleta e entrega seguem a mesma regra: revisão inicial sem
 -- metadados de correção; revisão posterior exige autor, instante e justificativa.
 -- Anulação exige revisão posterior. A FK verifica ADMIN; incrementar a revisão,
@@ -974,3 +980,32 @@ ALTER TABLE certificate_log
 ALTER TABLE certificate_log
     ADD CONSTRAINT ck_certificate_log_performed_at
     CHECK (isfinite(performed_at));
+
+-- SESSÕES: coerência estática. A validade atual é avaliada nas rotinas.
+ALTER TABLE auth_session
+    ADD CONSTRAINT ck_auth_session_dates CHECK (
+        isfinite(created_at) AND isfinite(last_renewed_at)
+        AND isfinite(idle_expires_at) AND isfinite(updated_at)
+        AND last_renewed_at >= created_at AND idle_expires_at > last_renewed_at
+        AND updated_at >= created_at
+        AND (revoked_at IS NULL OR (isfinite(revoked_at) AND revoked_at >= created_at))),
+    ADD CONSTRAINT ck_auth_session_revocation CHECK (
+        (revoked_at IS NULL) = (revocation_reason IS NULL));
+-- O ENUM limita os três motivos aprovados; não é necessário duplicá-lo em CHECK.
+ALTER TABLE auth_refresh_token
+    ADD CONSTRAINT ck_auth_refresh_hash CHECK (octet_length(token_hash) = 32),
+    ADD CONSTRAINT ck_auth_refresh_generation CHECK (generation > 0),
+    ADD CONSTRAINT ck_auth_refresh_dates CHECK (
+        isfinite(issued_at) AND isfinite(expires_at) AND expires_at > issued_at
+        AND (consumed_at IS NULL OR (isfinite(consumed_at)
+            AND consumed_at >= issued_at AND consumed_at < expires_at)));
+
+ALTER TABLE auth_session_log
+    ADD CONSTRAINT ck_auth_session_log_snapshot CHECK (
+        (operation = 'INSERT' AND snapshot_kind = 'AFTER')
+        OR (operation = 'DELETE' AND snapshot_kind = 'BEFORE') OR operation = 'UPDATE'),
+    ADD CONSTRAINT ck_auth_session_log_actor CHECK (
+        operational_driver_id IS NULL AND
+        ((actor_kind = 'USER' AND performed_by IS NOT NULL)
+         OR (actor_kind = 'SYSTEM' AND performed_by IS NULL))),
+    ADD CONSTRAINT ck_auth_session_log_performed_at CHECK (isfinite(performed_at));

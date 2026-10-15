@@ -102,6 +102,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             case 409 -> ApiErrorCode.RESOURCE_CONFLICT;
             case 415 -> ApiErrorCode.UNSUPPORTED_MEDIA_TYPE;
             case 422 -> ApiErrorCode.BUSINESS_RULE_VIOLATION;
+            case 429 -> ApiErrorCode.RATE_LIMITED;
             case 503 -> ApiErrorCode.SERVICE_UNAVAILABLE;
             default -> status.is5xxServerError() ? ApiErrorCode.INTERNAL_ERROR : ApiErrorCode.HTTP_REQUEST_ERROR;
         };

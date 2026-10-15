@@ -642,6 +642,125 @@ COMMENT ON FUNCTION fn_olius_sync_establishment_is_pev()
 IS 'Mantém establishment.is_pev derivado de PEVs APPROVED, evitando UPDATE quando a flag já está correta.';
 
 
+
+-- SESSÕES — funções exclusivas de trigger, independentes do script 04.
+CREATE OR REPLACE FUNCTION public.fn_olius_auth_token_guard()
+RETURNS TRIGGER LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' OR TG_OP = 'TRUNCATE' THEN
+        RAISE EXCEPTION 'Histórico de refresh tokens exige manutenção explícita; exclusão não permitida.' USING ERRCODE = '55000';
+    END IF;
+    IF ROW(NEW.id, NEW.session_id, NEW.token_hash, NEW.generation, NEW.issued_at, NEW.expires_at)
+       IS DISTINCT FROM ROW(OLD.id, OLD.session_id, OLD.token_hash, OLD.generation, OLD.issued_at, OLD.expires_at)
+       OR OLD.consumed_at IS NOT NULL OR NEW.consumed_at IS NULL THEN
+        RAISE EXCEPTION 'Token imutável: somente consumo único de NULL para timestamp é permitido.' USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_olius_auth_session_guard()
+RETURNS TRIGGER LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF ROW(NEW.id, NEW.user_id, NEW.created_at) IS DISTINCT FROM ROW(OLD.id, OLD.user_id, OLD.created_at) THEN
+        RAISE EXCEPTION 'A identidade e a criação da sessão são imutáveis.' USING ERRCODE = '55000';
+    END IF;
+    IF OLD.revoked_at IS NOT NULL AND ROW(NEW.revoked_at, NEW.revocation_reason, NEW.last_renewed_at, NEW.idle_expires_at)
+       IS DISTINCT FROM ROW(OLD.revoked_at, OLD.revocation_reason, OLD.last_renewed_at, OLD.idle_expires_at) THEN
+        RAISE EXCEPTION 'Sessão revogada não pode ser reativada ou renovada.' USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- Auditoria privilegiada apenas da sessão, sem SQL dinâmico ou tabela recebida
+-- por parâmetro. As funções genéricas existentes continuam SECURITY INVOKER.
+CREATE OR REPLACE FUNCTION public.fn_olius_auth_session_audit()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    v_event UUID := gen_random_uuid();
+    v_actor public.audit_actor_t := COALESCE(NULLIF(current_setting('app.audit_actor', true), ''), 'SYSTEM')::public.audit_actor_t;
+    v_author UUID := NULLIF(current_setting('app.current_user_id', true), '')::UUID;
+    v_driver UUID := NULLIF(current_setting('app.operational_driver_id', true), '')::UUID;
+    v_reason TEXT := NULLIF(current_setting('app.audit_reason', true), '');
+    v_changed TEXT[] := ARRAY[]::TEXT[];
+    v_row JSONB; v_side public.audit_snapshot_t;
+BEGIN
+    IF TG_RELID <> 'public.auth_session'::regclass OR TG_WHEN <> 'AFTER' THEN
+        RAISE EXCEPTION 'Trigger de auditoria exclusiva de auth_session AFTER.';
+    END IF;
+    IF v_actor = 'DRIVER_FORM' OR v_driver IS NOT NULL
+       OR (v_actor = 'USER' AND v_author IS NULL)
+       OR (v_actor = 'SYSTEM' AND v_author IS NOT NULL) THEN
+        RAISE EXCEPTION 'Contexto de autoria inválido para autenticação.' USING ERRCODE = '22023';
+    END IF;
+    IF TG_OP = 'UPDATE' THEN
+        SELECT ARRAY(SELECT o.key FROM jsonb_each(to_jsonb(OLD)) o
+                     JOIN jsonb_each(to_jsonb(NEW)) n USING (key)
+                     WHERE o.value IS DISTINCT FROM n.value ORDER BY o.key) INTO v_changed;
+    END IF;
+    FOREACH v_side IN ARRAY CASE TG_OP
+        WHEN 'INSERT' THEN ARRAY['AFTER'::public.audit_snapshot_t]
+        WHEN 'DELETE' THEN ARRAY['BEFORE'::public.audit_snapshot_t]
+        ELSE ARRAY['BEFORE'::public.audit_snapshot_t, 'AFTER'::public.audit_snapshot_t] END
+    LOOP
+        IF v_side = 'BEFORE' THEN v_row := to_jsonb(OLD); ELSE v_row := to_jsonb(NEW); END IF;
+        v_row := v_row || jsonb_build_object(
+            'log_id', gen_random_uuid(), 'audit_event_id', v_event, 'snapshot_kind', v_side,
+            'operation', TG_OP, 'performed_at', clock_timestamp(), 'performed_by', v_author,
+            'actor_kind', v_actor, 'operational_driver_id', NULL, 'audit_reason', v_reason,
+            'changed_columns', v_changed);
+        INSERT INTO public.auth_session_log
+        SELECT (jsonb_populate_record(NULL::public.auth_session_log, v_row)).*;
+    END LOOP;
+    RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_olius_auth_user_inactive()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    -- UPDATE de users já mantém o bloqueio do usuário até o fim da transação.
+    -- Preserva o autor autenticado da inativação (ou SYSTEM), separado do titular.
+    UPDATE public.auth_session SET revoked_at = clock_timestamp(), revocation_reason = 'ACCOUNT_INACTIVE'
+    WHERE user_id = NEW.id AND revoked_at IS NULL;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_auth_token_guard ON public.auth_refresh_token;
+CREATE TRIGGER trg_auth_token_guard BEFORE UPDATE OR DELETE ON public.auth_refresh_token
+FOR EACH ROW EXECUTE FUNCTION public.fn_olius_auth_token_guard();
+DROP TRIGGER IF EXISTS trg_auth_token_no_truncate ON public.auth_refresh_token;
+CREATE TRIGGER trg_auth_token_no_truncate BEFORE TRUNCATE ON public.auth_refresh_token
+FOR EACH STATEMENT EXECUTE FUNCTION public.fn_olius_auth_token_guard();
+DROP TRIGGER IF EXISTS trg_auth_session_guard ON public.auth_session;
+CREATE TRIGGER trg_auth_session_guard BEFORE UPDATE ON public.auth_session
+FOR EACH ROW EXECUTE FUNCTION public.fn_olius_auth_session_guard();
+DROP TRIGGER IF EXISTS trg_auth_session_updated_at ON public.auth_session;
+CREATE TRIGGER trg_auth_session_updated_at BEFORE UPDATE ON public.auth_session
+FOR EACH ROW EXECUTE FUNCTION public.fn_olius_set_updated_at();
+DROP TRIGGER IF EXISTS trg_auth_session_audit ON public.auth_session;
+CREATE TRIGGER trg_auth_session_audit AFTER INSERT OR UPDATE OR DELETE ON public.auth_session
+FOR EACH ROW EXECUTE FUNCTION public.fn_olius_auth_session_audit();
+DROP TRIGGER IF EXISTS trg_auth_user_inactive ON public.users;
+CREATE TRIGGER trg_auth_user_inactive AFTER UPDATE OF status ON public.users
+FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'INACTIVE')
+EXECUTE FUNCTION public.fn_olius_auth_user_inactive();
+
+-- Papéis e ownership são configurados em data_catalog/07_auth_roles.sql.
+REVOKE ALL ON FUNCTION public.fn_olius_auth_session_audit(), public.fn_olius_auth_user_inactive(),
+    public.fn_olius_auth_token_guard(), public.fn_olius_auth_session_guard() FROM PUBLIC;
+-- Execução de triggers instaladas não concede à API chamada direta dessas funções.
+
 COMMIT;
 
 
