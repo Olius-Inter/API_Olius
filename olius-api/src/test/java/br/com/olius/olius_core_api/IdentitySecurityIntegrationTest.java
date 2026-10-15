@@ -211,8 +211,15 @@ class IdentitySecurityIntegrationTest {
         mvc.perform(post("/api/v1/auth/web/login").cookie(csrfCookie).header("X-XSRF-TOKEN","invalid")
             .contentType(MediaType.APPLICATION_JSON).content(credentials)).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/auth/web/refresh").cookie(refresh)).andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/auth/web/refresh").cookie(refresh,csrfCookie).header("X-XSRF-TOKEN",csrfToken))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist());
+        var renewed=mvc.perform(post("/api/v1/auth/web/refresh").cookie(refresh,csrfCookie).header("X-XSRF-TOKEN",csrfToken))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist()).andReturn();
+        Cookie current=renewed.getResponse().getCookie("olius_refresh");
+        String access=json.readTree(renewed.getResponse().getContentAsString()).get("accessToken").asText();
+        mvc.perform(post("/api/v1/auth/web/logout").cookie(current,csrfCookie).header("X-XSRF-TOKEN",csrfToken))
+            .andExpect(status().isNoContent()).andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=0")));
+        mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+access)).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/auth/mobile/refresh").contentType(MediaType.APPLICATION_JSON)
+            .content(json.writeValueAsString(Map.of("refreshToken",current.getValue())))).andExpect(status().isUnauthorized());
     }
 
     @Test void administrativeProvisioningRequiresActiveAdminAndLogoutClosesOnlyCurrentSession() throws Exception {
@@ -230,6 +237,22 @@ class IdentitySecurityIntegrationTest {
             .andExpect(status().isNoContent());
         mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+first.access())).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+second.access())).andExpect(status().isOk());
+    }
+
+    @Test void webLogoutAcceptsExpiredBearerAndIsIdempotent() throws Exception {
+        var account=citizen(); var tokens=login(account.email());
+        String expired=signed(decoder.decode(tokens.access()),properties.getIssuer(),properties.getAudience(),Instant.now().minusSeconds(60));
+        mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+expired)).andExpect(status().isUnauthorized());
+        var csrf=mvc.perform(get("/api/v1/auth/web/csrf")).andReturn();
+        Cookie csrfCookie=csrf.getResponse().getCookie("XSRF-TOKEN");
+        String token=json.readTree(csrf.getResponse().getContentAsString()).get("token").asText();
+        mvc.perform(post("/api/v1/auth/web/logout").cookie(new Cookie("olius_refresh",tokens.refresh()),csrfCookie)
+            .header("Authorization","Bearer "+expired).header("X-XSRF-TOKEN",token))
+            .andExpect(status().isNoContent()).andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=0")));
+        mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+tokens.access())).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/auth/web/logout").cookie(csrfCookie).header("X-XSRF-TOKEN",token)).andExpect(status().isNoContent());
+        mvc.perform(post("/api/v1/auth/web/logout").cookie(csrfCookie,new Cookie("olius_refresh","bad"))
+            .header("X-XSRF-TOKEN",token)).andExpect(status().isNoContent());
     }
 
     @Test void invalidRefreshCannotOpenASession() throws Exception {

@@ -38,6 +38,10 @@ public class SecurityConfiguration {
         var provider = new JwtAuthenticationProvider(decoder);
         provider.setJwtAuthenticationConverter(converter);
         var bearer = new BearerTokenAuthenticationFilter(new ProviderManager(provider));
+        var resolver=new org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver();
+        var webLogout=PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/web/logout");
+        // This operation authenticates only by refresh cookie + CSRF, including expired access tokens.
+        bearer.setBearerTokenResolver(request -> webLogout.matches(request) ? null : resolver.resolve(request));
         bearer.setAuthenticationEntryPoint(entry);
         bearer.setAuthenticationFailureHandler(new AuthenticationEntryPointFailureHandler(entry));
         // Register the standard JWT filter explicitly: resource-server DSL adds an
@@ -50,7 +54,7 @@ public class SecurityConfiguration {
             .exceptionHandling(errors -> errors.authenticationEntryPoint(entry).accessDeniedHandler(denied))
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(HttpMethod.POST,"/api/v1/auth/registrations/citizens","/api/v1/auth/registrations/establishments",
-                    "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh").permitAll()
+                    "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh").permitAll()
                 .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types",
                     "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")

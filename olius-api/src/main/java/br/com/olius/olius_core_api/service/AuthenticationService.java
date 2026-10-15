@@ -46,6 +46,10 @@ public class AuthenticationService {
         Outcome outcome=sessions.rotate(secrets.hash(current),secrets.hash(next));
         return issue(outcome,next);
     }
+    public void logoutWeb(String refresh) {
+        // Idempotent for absent, malformed, expired or already revoked cookies.
+        if(secrets.valid(refresh)) sessions.logoutRefresh(secrets.hash(refresh),secrets.hash(secrets.generate()));
+    }
     private Tokens issue(Outcome outcome,String refresh) {
         if(!"OK".equals(outcome.code())) throw new BadCredentialsException("Sessão inválida");
         Instant now=Instant.now();
