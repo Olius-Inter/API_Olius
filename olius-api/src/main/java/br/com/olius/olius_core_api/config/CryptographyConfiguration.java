@@ -23,6 +23,7 @@ import org.springframework.security.oauth2.jwt.*;
 @Configuration @EnableConfigurationProperties(SecurityProperties.class)
 public class CryptographyConfiguration {
     private static final Logger LOG=LoggerFactory.getLogger(CryptographyConfiguration.class);
+    private static final SecureRandom RANDOM=new SecureRandom();
     @Bean public PasswordEncoder passwordEncoder() {
         // Argon2id
         return new Argon2PasswordEncoder(16,32,1,19456,2);
@@ -44,7 +45,7 @@ public class CryptographyConfiguration {
         if(publicKey.getModulus().bitLength()<2048 || !publicKey.getModulus().equals(privateKey.getModulus()))
             throw new IllegalStateException("Par de chaves RSA inválido");
         // Matching moduli alone do not prove that the public exponent matches.
-        byte[] challenge=new byte[32]; new SecureRandom().nextBytes(challenge);
+        byte[] challenge=new byte[32]; RANDOM.nextBytes(challenge);
         Signature proof=Signature.getInstance("SHA256withRSA");
         proof.initSign(privateKey); proof.update(challenge); byte[] signature=proof.sign();
         proof.initVerify(publicKey); proof.update(challenge);
