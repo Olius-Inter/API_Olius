@@ -22,15 +22,18 @@ class OpenApiConfigurationTest {
         var api = configuration.identityOpenApi();
         var web = new Operation();
         var mobile = new Operation();
+        var logout = new Operation();
         var protectedOperation = new Operation();
         api.setPaths(new Paths()
             .addPathItem("/api/v1/auth/web/refresh", new PathItem().post(web))
+            .addPathItem("/api/v1/auth/web/logout", new PathItem().post(logout))
             .addPathItem("/api/v1/auth/mobile/login", new PathItem().post(mobile))
             .addPathItem("/api/v1/users/me", new PathItem().get(protectedOperation)));
         api.getComponents().addSchemas("Login", new ObjectSchema().addProperty("password", new StringSchema()));
         configuration.identityContracts().customise(api);
         assertThat(web.getSecurity()).hasSize(1);
         assertThat(web.getSecurity().getFirst()).containsKeys("csrf", "refreshCookie");
+        assertThat(logout.getSecurity().getFirst()).containsKeys("csrf", "refreshCookie").doesNotContainKey("bearer");
         assertThat(mobile.getSecurity()).isEmpty();
         assertThat(protectedOperation.getSecurity().getFirst()).containsKey("bearer");
         assertThat(web.getResponses()).containsKeys("400", "401", "403", "409", "429", "503");

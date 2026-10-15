@@ -104,7 +104,7 @@ Prefixo: /api/v1. Corpos são JSON. Respostas de autenticação não devem ser a
 | GET /users/me | Bearer válido | Perfil próprio com documento, QR e vínculos |
 | GET /users/{id} | Titular ou ADMIN | Perfil autorizado |
 | GET /auth/session | Bearer válido | Identidade mínima e validade, para integração |
-| POST /auth/web/logout | Bearer + CSRF | 204 e exclusão do cookie |
+| POST /auth/web/logout | Cookie refresh + CSRF | 204 e exclusão do cookie, sem access válido |
 | POST /auth/mobile/logout | Bearer | 204 |
 | DELETE /auth/sessions | Bearer | 204: encerra todas as sessões do titular |
 | POST /admin/users | ADMIN | 201: novo administrador controlado |
@@ -135,7 +135,7 @@ Erros principais: 400 entrada inválida/campo desconhecido; 401 autenticação i
 3. Guardar somente o access token na memória. O refresh fica no cookie host-only, HttpOnly, Secure, SameSite=Strict e path=/api/v1/auth/web.
 4. No vencimento, chamar /auth/web/refresh com cookie e CSRF, sem anexar um Bearer já expirado.
 5. Após recarregar a página, obter CSRF e renovar usando o cookie persistido. Não colocar o refresh em localStorage.
-6. Logout exige Bearer válido e CSRF. Se o access expirou, renovar antes; logout de todas invalida a sessão mesmo que um cookie permaneça armazenado.
+6. Logout Web usa cookie refresh e CSRF, sem exigir access válido nem renovação anterior. Um Bearer enviado nessa rota é ignorado. Cookie ausente, inválido, expirado ou revogado resulta em 204 idempotente. O cookie é apagado mesmo se a revogação falhar; nesse caso a resposta informa a falha e não garante revogação no servidor. Logout de todas continua exigindo Bearer válido e invalida as sessões mesmo que um cookie permaneça armazenado.
 
 Em outra origem, configurar a lista exata de origens e credentials: include. A decisão de hospedagem ainda será necessária para avaliar SameSite. None exige Secure/HTTPS. CORS não substitui autenticação nem CSRF. O perfil local desativa Secure apenas para estudo via HTTP.
 
@@ -238,3 +238,11 @@ A exceção de análise estática está limitada ao método `SecurityConfigurati
 O filtro padrão `BearerTokenAuthenticationFilter` é registrado explicitamente com `JwtAuthenticationProvider`, o decoder e `SessionJwtConverter`. Isso mantém assinatura, claims e consulta de sessão existentes, sem a dispensa automática de CSRF por Bearer adicionada pela DSL de Resource Server. Assim, ter um JWT válido não dispensa o token CSRF em operações Web. Não foi criado um parser JWT próprio.
 
 Validação das correções da PR #9 em 14/10/2026: `mvnw -o verify` concluiu com BUILD SUCCESS, 105 testes executados, nenhuma falha, nenhum erro e nenhum teste ignorado, com JAR e relatório JaCoCo gerados. A opção offline utiliza o cache Maven e não evita os testes HTTP ou o PostgreSQL descartável do Testcontainers. A análise remota do Sonar depende de novo commit/push; não foi simulada como aprovada localmente.
+
+### Proteção da administração e das chaves
+
+A API impede inativar o último ADMIN ativo com HTTP 409 (`BUSINESS_STATE_CONFLICT`). A autoinativação é permitida quando há outro ADMIN ativo. Um bloqueio transacional no PostgreSQL serializa as mudanças de status entre instâncias; a conta de quem executa a operação é revalidada após o bloqueio. Essa proteção vale para operações pela API: alterações administrativas diretas no banco devem respeitar a mesma política.
+
+O logout Web valida o refresh pelas funções existentes: rotação e revogação ocorrem na mesma transação, sem entregar ou usar o sucessor. Isso preserva a revogação defensiva quando um refresh consumido é reapresentado, sem liberar acesso direto às tabelas de sessão. Não há alteração de schema.
+
+`Generate-JwtKeys.ps1` exige PowerShell 7. No Windows, a chave privada nasce com herança de permissões desativada e acesso somente ao usuário executor; em sistemas Unix, nasce com modo 0600. Uma conta de serviço diferente precisa receber explicitamente acesso de leitura. O script não sobrescreve arquivos existentes. Na inicialização, a aplicação verifica tamanho, módulo e assinatura/verificação real do par RSA antes de utilizá-lo.

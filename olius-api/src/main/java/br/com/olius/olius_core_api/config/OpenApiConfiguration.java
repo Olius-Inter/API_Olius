@@ -71,8 +71,7 @@ public class OpenApiConfiguration {
         operation.setSecurity(new ArrayList<>());
         if (path.startsWith("/api/v1/auth/web/") && !path.endsWith("/csrf")) {
             var requirement=new SecurityRequirement().addList(CSRF);
-            if (path.endsWith("/refresh")) requirement.addList(REFRESH_COOKIE);
-            if (path.endsWith("/logout")) requirement.addList(BEARER);
+            if (path.endsWith("/refresh") || path.endsWith("/logout")) requirement.addList(REFRESH_COOKIE);
             operation.setSecurity(List.of(requirement));
         } else if (!publicPath(path)) {
             operation.addSecurityItem(new SecurityRequirement().addList(BEARER));
@@ -99,9 +98,10 @@ public class OpenApiConfiguration {
     private String description(String path) {
         if(path.endsWith("/csrf")) return "Obter token CSRF e cookie; enviar token no header das operações web.";
         if(path.endsWith("/refresh")) return "Rotacionar refresh token. Web usa cookie HttpOnly; Mobile usa corpo JSON. Reutilização revoga a sessão.";
+        if(path.equals("/api/v1/auth/web/logout")) return "Cookie refresh e CSRF encerram a sessão, sem exigir access válido. Cookie ausente/inválido: 204 idempotente. Falha de banco: erro e cookie removido.";
         if(path.endsWith("/login")) return "Credenciais válidas e conta ativa geram JWT de 15 minutos e sessão renovável.";
         if(path.equals("/api/v1/auth/session")) return "Contrato com a segunda API: encaminhar Bearer do usuário, verificar identidade e revogação online. Retorna dados mínimos.";
-        if(path.startsWith("/api/v1/admin/")) return "Somente ADMIN ativo. Criar administrador ou alterar status, preservando histórico; inativação revoga sessões.";
+        if(path.startsWith("/api/v1/admin/")) return "Somente ADMIN ativo. Criar administrador ou alterar status, preservando histórico; inativação revoga sessões e não pode remover o último ADMIN ativo (409).";
         if(path.startsWith("/api/v1/auth/registrations/")) return "Cadastro público atômico, ativo sem confirmação por e-mail. Nenhum privilégio, timestamp, saldo ou status é controlado pelo cliente.";
         if(path.startsWith("/api/v1/users/")) return "Titular consulta o próprio cadastro; ADMIN pode consultar outro usuário. CPF/CNPJ e QR restritos a esse acesso.";
         return "Operação de identidade; consulte docs/identidade-seguranca.md para o fluxo completo.";
