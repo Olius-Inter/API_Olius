@@ -43,6 +43,12 @@ public class CryptographyConfiguration {
             pem(properties.getPublicKeyPath(),"PUBLIC KEY")));
         if(publicKey.getModulus().bitLength()<2048 || !publicKey.getModulus().equals(privateKey.getModulus()))
             throw new IllegalStateException("Par de chaves RSA inválido");
+        // Matching moduli alone do not prove that the public exponent matches.
+        byte[] challenge=new byte[32]; new SecureRandom().nextBytes(challenge);
+        Signature proof=Signature.getInstance("SHA256withRSA");
+        proof.initSign(privateKey); proof.update(challenge); byte[] signature=proof.sign();
+        proof.initVerify(publicKey); proof.update(challenge);
+        if(!proof.verify(signature)) throw new IllegalStateException("Par de chaves RSA inválido");
         return new KeyPair(publicKey,privateKey);
     }
     private byte[] pem(String path,String kind) throws IOException {

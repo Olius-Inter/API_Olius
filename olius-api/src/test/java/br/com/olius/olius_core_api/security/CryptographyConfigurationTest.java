@@ -20,6 +20,18 @@ class CryptographyConfigurationTest {
         var missingKeys = new SecurityProperties();
         assertThatThrownBy(() -> config.jwtKeys(missingKeys)).isInstanceOf(IllegalStateException.class);
     }
+    @Test void sameModulusWithWrongPublicExponentIsRejected() throws Exception {
+        var config=new CryptographyConfiguration(); var ephemeral=new SecurityProperties(); ephemeral.setEphemeralKeys(true);
+        var keys=config.jwtKeys(ephemeral);
+        var publicKey=(java.security.interfaces.RSAPublicKey)keys.getPublic();
+        var wrongKey=java.security.KeyFactory.getInstance("RSA").generatePublic(
+            new java.security.spec.RSAPublicKeySpec(publicKey.getModulus(),java.math.BigInteger.valueOf(3)));
+        var privatePath=directory.resolve("private.pem"); var publicPath=directory.resolve("public.pem");
+        Files.writeString(privatePath,pem("PRIVATE KEY",keys.getPrivate().getEncoded()));
+        Files.writeString(publicPath,pem("PUBLIC KEY",wrongKey.getEncoded()));
+        var properties=new SecurityProperties(); properties.setPrivateKeyPath(privatePath.toString()); properties.setPublicKeyPath(publicPath.toString());
+        assertThatThrownBy(() -> config.jwtKeys(properties)).isInstanceOf(IllegalStateException.class);
+    }
     private String pem(String kind,byte[] bytes) {
         return "-----BEGIN "+kind+"-----\n"+Base64.getEncoder().encodeToString(bytes)+"\n-----END "+kind+"-----\n";
     }
