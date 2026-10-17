@@ -1,5 +1,5 @@
 package br.com.olius.olius_core_api.security;
-import br.com.olius.olius_core_api.entity.UserType;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import java.util.UUID;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;

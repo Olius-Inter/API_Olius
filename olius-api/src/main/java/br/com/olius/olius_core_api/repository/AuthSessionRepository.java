@@ -1,5 +1,5 @@
 package br.com.olius.olius_core_api.repository;
-import br.com.olius.olius_core_api.entity.UserType;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;

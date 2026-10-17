@@ -1,5 +1,7 @@
 package br.com.olius.olius_core_api.entity;
 
+import br.com.olius.olius_core_api.entity.enums.UserStatus;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
