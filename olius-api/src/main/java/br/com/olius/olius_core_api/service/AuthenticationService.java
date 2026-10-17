@@ -2,7 +2,7 @@ package br.com.olius.olius_core_api.service;
 import br.com.olius.olius_core_api.config.SecurityProperties;
 import br.com.olius.olius_core_api.dto.IdentityRequests.Login;
 import br.com.olius.olius_core_api.dto.IdentityResponses.Access;
-import br.com.olius.olius_core_api.entity.UserStatus;
+import br.com.olius.olius_core_api.entity.enums.UserStatus;
 import br.com.olius.olius_core_api.repository.AuthSessionRepository.Outcome;
 import br.com.olius.olius_core_api.repository.UserRepository;
 import br.com.olius.olius_core_api.security.SecretTokens;

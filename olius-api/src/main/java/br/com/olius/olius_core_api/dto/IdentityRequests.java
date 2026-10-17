@@ -1,5 +1,5 @@
 package br.com.olius.olius_core_api.dto;
-import br.com.olius.olius_core_api.entity.UserStatus;
+import br.com.olius.olius_core_api.entity.enums.UserStatus;
 import br.com.olius.olius_core_api.validation.StrongPassword;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;

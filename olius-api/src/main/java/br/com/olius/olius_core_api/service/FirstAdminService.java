@@ -1,6 +1,7 @@
 package br.com.olius.olius_core_api.service;
 import br.com.olius.olius_core_api.dto.IdentityRequests.AdminRegistration;
 import br.com.olius.olius_core_api.entity.*;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.Validator;
 import java.util.UUID;
@@ -27,6 +28,6 @@ public class FirstAdminService {
             throw new IllegalStateException("Já existe administrador; utilize o fluxo administrativo autenticado");
         audit.system("Provisionamento inicial por operador autorizado");
         UUID id=UUID.randomUUID(); em.persist(new User(id,request.name().strip(),EmailAddress.normalize(request.email()),
-            passwords.encode(request.password()),UserType.ADMIN)); em.flush(); return id;
+            passwords.encode(request.password()), UserType.ADMIN)); em.flush(); return id;
     }
 }

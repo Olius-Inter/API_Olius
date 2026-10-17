@@ -1,4 +1,5 @@
 package br.com.olius.olius_core_api.entity;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import jakarta.persistence.*;
 import java.util.UUID;
 import lombok.AccessLevel;
