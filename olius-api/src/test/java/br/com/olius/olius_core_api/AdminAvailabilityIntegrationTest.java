@@ -1,6 +1,6 @@
 package br.com.olius.olius_core_api;
 
-import br.com.olius.olius_core_api.entity.UserStatus;
+import br.com.olius.olius_core_api.entity.enums.UserStatus;
 import br.com.olius.olius_core_api.exception.BusinessRuleException;
 import br.com.olius.olius_core_api.service.UserAdministrationService;
 import br.com.olius.olius_core_api.testfixture.OfficialPostgres;

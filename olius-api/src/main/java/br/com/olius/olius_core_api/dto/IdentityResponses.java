@@ -1,6 +1,6 @@
 package br.com.olius.olius_core_api.dto;
-import br.com.olius.olius_core_api.entity.UserStatus;
-import br.com.olius.olius_core_api.entity.UserType;
+import br.com.olius.olius_core_api.entity.enums.UserStatus;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;

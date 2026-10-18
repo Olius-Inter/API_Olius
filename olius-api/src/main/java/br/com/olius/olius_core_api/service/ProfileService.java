@@ -1,6 +1,7 @@
 package br.com.olius.olius_core_api.service;
 import br.com.olius.olius_core_api.dto.IdentityResponses.*;
 import br.com.olius.olius_core_api.entity.*;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import br.com.olius.olius_core_api.repository.*;
 import java.util.UUID;
@@ -18,7 +19,7 @@ public class ProfileService {
         this.users=users; this.citizens=citizens; this.establishments=establishments; this.telephones=telephones;
     }
     @Transactional(readOnly=true)
-    public Profile get(UUID target,UUID actor,UserType role) {
+    public Profile get(UUID target, UUID actor, UserType role) {
         if(!target.equals(actor) && role!=UserType.ADMIN) throw new AccessDeniedException("Titularidade inválida");
         User u=users.findById(target).orElseThrow(ResourceNotFoundException::new);
         String cpf=null;

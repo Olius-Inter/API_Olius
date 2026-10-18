@@ -1,5 +1,5 @@
 package br.com.olius.olius_core_api.service;
-import br.com.olius.olius_core_api.entity.UserStatus;
+import br.com.olius.olius_core_api.entity.enums.UserStatus;
 import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import br.com.olius.olius_core_api.exception.BusinessRuleException;
 import org.springframework.security.access.AccessDeniedException;

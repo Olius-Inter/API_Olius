@@ -2,6 +2,7 @@ package br.com.olius.olius_core_api.service;
 import br.com.olius.olius_core_api.dto.IdentityRequests.*;
 import br.com.olius.olius_core_api.dto.IdentityResponses.Registration;
 import br.com.olius.olius_core_api.entity.*;
+import br.com.olius.olius_core_api.entity.enums.UserType;
 import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import br.com.olius.olius_core_api.repository.EstablishmentTypeRepository;
 import br.com.olius.olius_core_api.security.SecretTokens;
@@ -26,7 +27,7 @@ public class RegistrationService {
     }
     @Transactional
     public Registration citizen(CitizenRegistration request) {
-        UUID id=createUser(request.name(),request.email(),request.password(),UserType.CITIZENS);
+        UUID id=createUser(request.name(),request.email(),request.password(), UserType.CITIZENS);
         String qr=qr(id,UserType.CITIZENS);
         em.persist(new Citizen(id,request.cpf(),qr));
         phones(id,request.telephones()); em.flush();
