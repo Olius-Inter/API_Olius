@@ -2,7 +2,7 @@
 ===============================================================================
 PROJETO.............: ÓLEO AMIGO — OLIUS
 BANCO DE DADOS......: PostgreSQL 16.15 (alvo)
-SCRIPT..............: 04 - Functions, Procedures e Window Functions de Negócio
+SCRIPT..............: 04 - Functions e Procedures de Negócio
 SEÇÃO................: 01 - Functions
 ===============================================================================
 
@@ -350,7 +350,7 @@ COMMIT;
 ===============================================================================
 PROJETO.............: ÓLEO AMIGO — OLIUS
 BANCO DE DADOS......: PostgreSQL 16.15 (alvo)
-SCRIPT..............: 04 - Functions e Procedures e Window Functions de Negócio
+SCRIPT..............: 04 - Functions e Procedures de Negócio
 SEÇÃO................: 02 - Procedures
 ===============================================================================
 
@@ -2228,4 +2228,141 @@ REVOKE ALL ON FUNCTION public.record_collection_arrival(uuid,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.accept_collection_service(uuid,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.reject_collection_request(uuid,uuid,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.set_billing_charge_external_status(uuid,public.charge_status_t) FROM PUBLIC;
+COMMIT;
+
+BEGIN;
+-- BEGIN ADMIN_MANAGEMENT
+-- Coordenação, inclusive INSERTs cadastrais/email, para evitar corrida com o aceite.
+CREATE OR REPLACE FUNCTION public.lock_admin_registry() RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+    UPDATE public.admin_guard_state SET revision=revision+1 WHERE singleton;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Controle administrativo ausente.' USING ERRCODE='55000'; END IF;
+END $$;
+
+-- Helper privado compartilhado pela emissão normal e pelo bootstrap restrito.
+CREATE OR REPLACE FUNCTION public.create_admin_invitation_internal(p_admin_id UUID,p_name TEXT,p_email TEXT,p_token_hash BYTEA)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_email TEXT:=lower(btrim(p_email)); v_now TIMESTAMPTZ; v_id UUID;
+BEGIN
+    PERFORM public.lock_admin_registry();
+    IF p_name IS NULL OR btrim(p_name)='' OR p_email IS NULL OR position('@' IN v_email)<=1
+       OR p_token_hash IS NULL OR octet_length(p_token_hash)<>32 THEN
+        RAISE EXCEPTION 'Nome, e-mail ou hash de convite inválido.' USING ERRCODE='22023';
+    END IF;
+    IF p_admin_id IS NULL THEN
+        IF EXISTS(SELECT 1 FROM public.users WHERE user_type='ADMIN') THEN
+            RAISE EXCEPTION 'Bootstrap encerrado: já existe administrador cadastrado.' USING ERRCODE='55000';
+        END IF;
+    ELSIF NOT EXISTS(SELECT 1 FROM public.users WHERE id=p_admin_id AND user_type='ADMIN' AND status='ACTIVE') THEN
+        RAISE EXCEPTION 'Emissão exige administrador ativo.' USING ERRCODE='42501';
+    END IF;
+    IF EXISTS(SELECT 1 FROM public.users WHERE lower(btrim(email))=v_email) THEN
+        RAISE EXCEPTION 'E-mail já cadastrado; não é permitido promover outra conta.' USING ERRCODE='23505';
+    END IF;
+    IF EXISTS(SELECT 1 FROM public.admin_invitation WHERE token_hash=p_token_hash) THEN
+        RAISE EXCEPTION 'Emita um novo segredo para cada convite.' USING ERRCODE='23505';
+    END IF;
+    PERFORM set_config('app.audit_actor',CASE WHEN p_admin_id IS NULL THEN 'SYSTEM' ELSE 'USER' END,true);
+    PERFORM set_config('app.current_user_id',coalesce(p_admin_id::TEXT,''),true);
+    PERFORM set_config('app.operational_driver_id','',true);
+    PERFORM set_config('app.audit_reason','Emissão ou reenvio de convite administrativo',true);
+    v_now:=clock_timestamp();
+    UPDATE public.admin_invitation SET revoked_at=v_now,revoked_by=p_admin_id
+        WHERE email=v_email AND accepted_at IS NULL AND revoked_at IS NULL;
+    INSERT INTO public.admin_invitation(name,email,token_hash,issued_at,expires_at,invited_by,is_bootstrap)
+        VALUES(btrim(p_name),v_email,p_token_hash,v_now,v_now+INTERVAL '24 hours',p_admin_id,p_admin_id IS NULL)
+        RETURNING id INTO v_id;
+    RETURN v_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.issue_admin_invitation(p_admin_id UUID,p_name TEXT,p_email TEXT,p_token_hash BYTEA)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+    IF p_admin_id IS NULL THEN RAISE EXCEPTION 'Administrador obrigatório.' USING ERRCODE='42501'; END IF;
+    RETURN public.create_admin_invitation_internal(p_admin_id,p_name,p_email,p_token_hash);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.issue_bootstrap_admin_invitation(p_name TEXT,p_email TEXT,p_token_hash BYTEA)
+RETURNS UUID LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+    SELECT public.create_admin_invitation_internal(NULL,p_name,p_email,p_token_hash)
+$$;
+
+CREATE OR REPLACE FUNCTION public.revoke_admin_invitation(p_admin_id UUID,p_invitation_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_item public.admin_invitation%ROWTYPE;
+BEGIN
+    PERFORM public.lock_admin_registry();
+    IF NOT EXISTS(SELECT 1 FROM public.users WHERE id=p_admin_id AND user_type='ADMIN' AND status='ACTIVE') THEN
+        RAISE EXCEPTION 'Revogação exige administrador ativo.' USING ERRCODE='42501';
+    END IF;
+    SELECT * INTO v_item FROM public.admin_invitation WHERE id=p_invitation_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Convite não encontrado.' USING ERRCODE='P0002'; END IF;
+    IF v_item.accepted_at IS NOT NULL THEN RAISE EXCEPTION 'Convite já aceito.' USING ERRCODE='55000'; END IF;
+    IF v_item.revoked_at IS NOT NULL THEN RETURN FALSE; END IF;
+    PERFORM set_config('app.audit_actor','USER',true);
+    PERFORM set_config('app.current_user_id',p_admin_id::TEXT,true);
+    PERFORM set_config('app.operational_driver_id','',true);
+    PERFORM set_config('app.audit_reason','Revogação de convite administrativo',true);
+    UPDATE public.admin_invitation SET revoked_at=clock_timestamp(),revoked_by=p_admin_id WHERE id=v_item.id;
+    RETURN TRUE;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.accept_admin_invitation(p_token_hash BYTEA,p_password_hash TEXT)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_item public.admin_invitation%ROWTYPE; v_now TIMESTAMPTZ; v_user UUID:=gen_random_uuid();
+BEGIN
+    PERFORM public.lock_admin_registry();
+    IF p_token_hash IS NULL OR octet_length(p_token_hash)<>32 OR p_password_hash IS NULL OR btrim(p_password_hash)='' THEN
+        RAISE EXCEPTION 'Hash de convite e hash de senha obrigatórios.' USING ERRCODE='22023';
+    END IF;
+    SELECT * INTO v_item FROM public.admin_invitation WHERE token_hash=p_token_hash FOR UPDATE;
+    v_now:=clock_timestamp();
+    IF NOT FOUND OR v_item.accepted_at IS NOT NULL OR v_item.revoked_at IS NOT NULL OR v_item.expires_at<=v_now THEN
+        RAISE EXCEPTION 'Convite inválido, expirado ou já utilizado.' USING ERRCODE='55000';
+    END IF;
+    IF v_item.is_bootstrap THEN
+        IF EXISTS(SELECT 1 FROM public.users WHERE user_type='ADMIN') THEN
+            RAISE EXCEPTION 'Bootstrap encerrado.' USING ERRCODE='55000';
+        END IF;
+    ELSIF NOT EXISTS(SELECT 1 FROM public.users WHERE id=v_item.invited_by AND user_type='ADMIN' AND status='ACTIVE') THEN
+        RAISE EXCEPTION 'Autor do convite não está ativo.' USING ERRCODE='42501';
+    END IF;
+    IF EXISTS(SELECT 1 FROM public.users WHERE lower(btrim(email))=v_item.email) THEN
+        RAISE EXCEPTION 'E-mail já cadastrado.' USING ERRCODE='23505';
+    END IF;
+    PERFORM set_config('app.audit_actor','SYSTEM',true);
+    PERFORM set_config('app.current_user_id','',true);
+    PERFORM set_config('app.operational_driver_id','',true);
+    PERFORM set_config('app.audit_reason','Criação de ADMIN por aceite de convite',true);
+    INSERT INTO public.users(id,name,email,password_hash,user_type)
+        VALUES(v_user,v_item.name,v_item.email,p_password_hash,'ADMIN');
+    PERFORM set_config('app.audit_actor','USER',true);
+    PERFORM set_config('app.current_user_id',v_user::TEXT,true);
+    UPDATE public.admin_invitation SET accepted_at=v_now,accepted_user_id=v_user WHERE id=v_item.id;
+    RETURN v_user;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.set_admin_status(p_admin_id UUID,p_target_id UUID,p_status public.active_status_t)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+    PERFORM public.lock_admin_registry();
+    IF NOT EXISTS(SELECT 1 FROM public.users WHERE id=p_admin_id AND user_type='ADMIN' AND status='ACTIVE') THEN
+        RAISE EXCEPTION 'Operação exige administrador ativo.' USING ERRCODE='42501';
+    END IF;
+    IF p_status IS NULL THEN RAISE EXCEPTION 'Status obrigatório.' USING ERRCODE='22023'; END IF;
+    PERFORM set_config('app.audit_actor','USER',true);
+    PERFORM set_config('app.current_user_id',p_admin_id::TEXT,true);
+    PERFORM set_config('app.operational_driver_id','',true);
+    PERFORM set_config('app.audit_reason','Gerenciamento de status administrativo',true);
+    UPDATE public.users SET status=p_status WHERE id=p_target_id AND user_type='ADMIN';
+    IF NOT FOUND THEN RAISE EXCEPTION 'Administrador alvo não encontrado.' USING ERRCODE='P0002'; END IF;
+END $$;
+REVOKE ALL ON FUNCTION public.lock_admin_registry(),
+    public.create_admin_invitation_internal(UUID,TEXT,TEXT,BYTEA),
+    public.issue_admin_invitation(UUID,TEXT,TEXT,BYTEA),
+    public.issue_bootstrap_admin_invitation(TEXT,TEXT,BYTEA),
+    public.revoke_admin_invitation(UUID,UUID), public.accept_admin_invitation(BYTEA,TEXT),
+    public.set_admin_status(UUID,UUID,public.active_status_t) FROM PUBLIC;
+-- END ADMIN_MANAGEMENT
 COMMIT;

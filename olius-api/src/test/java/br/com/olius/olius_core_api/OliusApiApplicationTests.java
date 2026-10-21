@@ -48,7 +48,7 @@ class OliusApiApplicationTests {
     @Test
     void contextLoadsAgainstOfficialSchema() {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'", Integer.class))
-                .isEqualTo(58);
+                .isEqualTo(61);
         assertThat(jdbc.queryForObject("SELECT current_database()", String.class)).isNotEqualTo("olius_dev");
     }
 

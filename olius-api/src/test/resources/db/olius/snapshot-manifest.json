@@ -1,30 +1,42 @@
 {
   "source": "DB_Segundo/PostgreSQL",
-  "reviewed_at": "2026-10-08",
+  "reviewed_at": "2026-10-20",
   "files": [
     {
       "file": "01_structure.sql",
-      "sha256": "a5436190663eb396790eeb48f46c68dcea46b778fbba5c8662f7f447f2e6f279"
+      "sha256": "47bc5582b16ec87e85c2dc285aa68b063d40f581d1581de150a4b85feacf7979"
     },
     {
       "file": "02_check_constraints.sql",
-      "sha256": "787e9f4addbe8fd41f4912fe13f7724c3f6e619683166c29c69466dd2f41c267"
+      "sha256": "fc8d5ec45af3305c8c4e6fc585e58079d1a828a91aab1108900c0cae4379acbf"
     },
     {
       "file": "03_indexes.sql",
-      "sha256": "386c24f58a1fe0bc04dcfe0cf857892c37a2f42f0069587ee39ca1c6d3e5d51d"
+      "sha256": "beb34aa1a7f55633b0dd75b965da39ca8df9a3cfa217d495e815d38aad467adb"
     },
     {
-      "file": "04_functions_procedures_window_functions.sql",
-      "sha256": "fcaa1ba7e1179c35d3eb49cf09cd78448759fd7c943a6ba41d13d9ed6e782207"
+      "file": "04_functions_procedures.sql",
+      "sha256": "84b3ce08645cade18db20b0b1550da4fc371dbe6620a5bf90a89b98a4f2871d0"
     },
     {
       "file": "05_triggers.sql",
-      "sha256": "42bd33a22e516d5c2ae09c5ae1ca70f0f3bbe8ddd5b404ef59dce506a5dc025e"
+      "sha256": "95dafc54bc2913f93def8bd4b66ea83e2ed7de691509c2c1dfd428486fda6275"
+    },
+    {
+      "file": "06_ctes.sql",
+      "sha256": "674143ca51021c73a8972d7d7e88b5733db212846eb51f407aef5d2be3454613"
+    },
+    {
+      "file": "07_window_functions.sql",
+      "sha256": "268223aa0ace4c26a1455a9b81effffad67f026bac3c0e6bbb130d213741d967"
+    },
+    {
+      "file": "08_materialized_views.sql",
+      "sha256": "6120472e07f85beb2c2bdb5870ba731099d38a6c356a21a282ff778dccfdd72f"
     },
     {
       "file": "access_control/01_roles.sql",
-      "sha256": "a3b6589865750f89cbc4321bdbcfd0b2d20d3fee5d980e858243ffa77b14ea97"
+      "sha256": "db9e4d9a37cbea800ed48e93a45797b65e3cdba52564af62de133408e86c5a9a"
     },
     {
       "file": "data_catalog/01_structure.sql",
@@ -40,7 +52,11 @@
     },
     {
       "file": "data_catalog/04_load.sql",
-      "sha256": "81efa8f77ea12c46598e5a13a7b5358e912f8c3c491ae48a0a8a26594f021112"
+      "sha256": "80e079111badff35a272a50568d6b9b9a202df47828ef460684fba0b3f208020"
+    },
+    {
+      "file": "data_catalog/05_validate.sql",
+      "sha256": "790437aa04e983fe5d279277a57c928ec5a066d93849f4e72a5b474a0a3a04d6"
     }
   ]
 }

@@ -21,7 +21,8 @@ public final class OfficialPostgres extends PostgreSQLContainer {
              var statement = connection.createStatement()) {
             for (String script : new String[]{
                     "01_structure.sql", "02_check_constraints.sql", "03_indexes.sql",
-                    "04_functions_procedures_window_functions.sql", "05_triggers.sql",
+                    "04_functions_procedures.sql", "05_triggers.sql",
+                    "06_ctes.sql", "07_window_functions.sql", "08_materialized_views.sql",
                     "data_catalog/01_structure.sql", "data_catalog/02_check_constraints.sql",
                     "data_catalog/03_view.sql", "data_catalog/04_load.sql", "access_control/01_roles.sql"}) {
                 // JDBC preserva os blocos dollar-quoted e as transações dos scripts oficiais.
