@@ -39,7 +39,7 @@ A sessão persistida no PostgreSQL permite encerrar o acesso antes do vencimento
 | entity | Mapeamento fiel das tabelas, tipos nativos e campos controlados pelo banco |
 | dto | Entradas específicas e respostas que não expõem hashes nem entidades |
 | security | Validação JWT, consulta de sessão, cookies e filtros anteriores ao MVC |
-| config | SecurityFilterChain, CORS, CSRF, chaves, OpenAPI e provisionamento offline |
+| config | SecurityFilterChain, CORS, CSRF, chaves e OpenAPI |
 | validation | Política estrutural da senha |
 | exception | Problem Details existente, com resposta 429 para o limite técnico |
 
@@ -107,7 +107,10 @@ Prefixo: /api/v1. Corpos são JSON. Respostas de autenticação não devem ser a
 | POST /auth/web/logout | Cookie refresh + CSRF | 204 e exclusão do cookie, sem access válido |
 | POST /auth/mobile/logout | Bearer | 204 |
 | DELETE /auth/sessions | Bearer | 204: encerra todas as sessões do titular |
-| POST /admin/users | ADMIN | 201: novo administrador controlado |
+| POST /admin/invitations | ADMIN | 201: convite emitido e entregue pelo adapter; 503 sem serviço de entrega |
+| GET /admin/invitations e /admin/invitations/{id} | ADMIN | Metadados sem segredo/hash |
+| POST /admin/invitations/{id}/revocation | ADMIN | 204, inclusive se já revogado |
+| POST /auth/admin-invitations/acceptance | Público com segredo | 204: conta criada; realizar login normal |
 | PATCH /admin/users/{id}/status | ADMIN | 204: ACTIVE ou INACTIVE |
 
 Erros principais: 400 entrada inválida/campo desconhecido; 401 autenticação inválida; 403 perfil/titularidade/CSRF; 404 recurso inexistente; 409 duplicidade; 429 excesso de requisições; 500 falha interna; 503 indisponibilidade do banco.
@@ -155,7 +158,7 @@ Encaminhar o access token original do usuário em Authorization: Bearer para GET
 4. Para chaves persistentes, executar scripts/Generate-JwtKeys.ps1 com PowerShell 7 e configurar os caminhos privados/públicos. O script não sobrescreve arquivos existentes. A chave privada deve permanecer restrita ao operador/processo; o par não deve ser versionado.
 5. Fora do perfil local, o modo efêmero fica desativado, Secure fica ativo e os caminhos das chaves são obrigatórios. Não há segredo JWT padrão no código.
 
-O bootstrap do administrador não roda por padrão. Em uma execução offline autorizada, fornecer OLIUS_INITIAL_ADMIN_NAME, OLIUS_INITIAL_ADMIN_EMAIL e OLIUS_INITIAL_ADMIN_PASSWORD por variáveis de ambiente e iniciar o JAR com `--spring.main.web-application-type=none --olius.admin-bootstrap.enabled=true`. Configurar também datasource/chaves ou usar perfil local explicitamente nessa execução. O processo cria somente o primeiro administrador, recusa se já houver qualquer ADMIN e encerra. Remover as variáveis da sessão do terminal após o uso. Não passar senha na linha de comando. Nenhum administrador foi criado automaticamente nos bancos reais durante o desenvolvimento.
+O antigo bootstrap por `FirstAdminRunner`/senha de ambiente foi removido. O primeiro ADMIN nasce por aceite de convite emitido por operador autorizado usando `issue_bootstrap_admin_invitation` na implantação. A role da Core não pode emitir esse convite, nem existe endpoint público de bootstrap. Nenhuma conta ou convite real é criado na inicialização da API. As antigas variáveis `OLIUS_INITIAL_ADMIN_*` e `olius.admin-bootstrap.enabled` não provisionam mais contas. A preparação operacional e entrega real do convite inicial pertencem à segunda sprint administrativa.
 
 ### Variáveis de configuração
 
@@ -177,7 +180,7 @@ O `application-local.properties` importa opcionalmente o `.env` local. Não vers
 
 ### Limites técnicos e implantação
 
-Login, cadastro e refresh possuem limite técnico configurável de 60 requisições por minuto por IP observado, por instância. Resposta 429 inclui Retry-After. O armazenamento tem capacidade máxima; entradas ativas não são descartadas para contornar o limite. Isso não bloqueia permanentemente contas nem introduz punições de negócio.
+Login, cadastro, refresh e aceite de convite possuem limite técnico configurável de 60 requisições por minuto por IP observado, por instância. Resposta 429 inclui Retry-After. O armazenamento tem capacidade máxima; entradas ativas não são descartadas para contornar o limite. Isso não bloqueia permanentemente contas nem introduz punições de negócio.
 
 O filtro não confia em X-Forwarded-For enviado pelo cliente. Em implantação atrás de proxy confiável ou com múltiplas instâncias, configurar a fronteira de rede e um limite compartilhado no gateway; a escolha depende da hospedagem. Revisar o custo Argon2 sob a carga do ambiente final. O acesso a CPF, CNPJ e QR exige perfil/titularidade e não deve ser copiado para logs.
 
@@ -191,13 +194,13 @@ IdentitySecurityIntegrationTest instala o banco atual em container descartável,
 
 Com Java 21 e Docker Desktop ativos, executar `mvnw.cmd verify` no Windows, na pasta da API. O container é criado e encerrado pelo ciclo de testes; não é necessário manter um serviço PostgreSQL adicional no CI.
 
-Os SQL de `src/test/resources/db/olius` são cópias da referência oficial, com hashes no `snapshot-manifest.json`. A fixture instala os scripts principais 01–05, estrutura/view/carga do catálogo e roles antes de disponibilizar o datasource. Não instala o script 06 nem as contas pessoais de `access_control/02_users.sql`. Essas cópias não são migrations e não alteram desenvolvimento ou produção. Ao atualizar a referência, revisar mudanças, substituir cópias, atualizar o manifesto e executar a suíte; não inventar regras somente no SQL dos testes.
+Os SQL de `src/test/resources/db/olius` são cópias oficiais revisadas em 20/10/2026, com hashes no `snapshot-manifest.json`. A fixture instala 01–08, estrutura/view/carga do catálogo e roles; Data Mart e views anuais são dependências das permissões atuais. Não executa refresh manual 09, contas pessoais/técnicas reais, massa de demonstração ou migração de ambientes existentes. São 61 tabelas em public: 58 dos scripts principais e três do catálogo. Essas cópias não são migrations de desenvolvimento/produção.
 
 Os testes verificam cadastro e vínculos, rollback e auditoria, política de senha, e-mail sensível a maiúsculas, hash Argon2id, JWT, conta inativa, titularidade, permissões administrativas, rotação e reutilização com commit, logout, CSRF real e CORS. AuthDatabaseContractTest continua validando as funções e privilégios diretamente. O CI já executa mvnw verify e descobre os novos testes automaticamente.
 
 Para aprender, acompanhe primeiro RegistrationService, depois AuthenticationService/SessionTransactions e por último SecurityConfiguration/SessionJwtConverter. Exercícios opcionais: desenhar o caminho de um 401 por token inválido; explicar por que a revogação precisa de commit; escrever um novo teste de expiração usando a estrutura existente. A implementação necessária à sprint não depende desses exercícios.
 
-### Resultado da verificação
+### Resultado histórico da verificação
 
 Em 08/10/2026, a execução completa de `mvnw verify` terminou com BUILD SUCCESS: 100 testes executados, sem falhas, erros ou testes ignorados. O JAR da aplicação e o relatório JaCoCo foram gerados. A suíte inclui proteção contra tentativas de contornar CSRF e o limite de autenticação por caminhos codificados na URL, além do carregamento de chaves RSA persistentes e do provisionamento controlado do primeiro administrador.
 
@@ -246,3 +249,79 @@ A API impede inativar o último ADMIN ativo com HTTP 409 (`BUSINESS_STATE_CONFLI
 O logout Web valida o refresh pelas funções existentes: rotação e revogação ocorrem na mesma transação, sem entregar ou usar o sucessor. Isso preserva a revogação defensiva quando um refresh consumido é reapresentado, sem liberar acesso direto às tabelas de sessão. Não há alteração de schema.
 
 `Generate-JwtKeys.ps1` exige PowerShell 7. No Windows, a chave privada nasce com herança de permissões desativada e acesso somente ao usuário executor; em sistemas Unix, nasce com modo 0600. Uma conta de serviço diferente precisa receber explicitamente acesso de leitura. O script não sobrescreve arquivos existentes. Na inicialização, a aplicação verifica tamanho, módulo e assinatura/verificação real do par RSA antes de utilizá-lo.
+
+
+## Administração por convite — primeira sprint
+
+### O que o fluxo faz
+
+Um ADMIN ativo convida uma pessoa por nome e e-mail. O destinatário só ganha conta ao aceitar o convite e definir sua própria senha. Ninguém recebe senha provisória e o aceite não cria uma sessão: é preciso efetuar o login normal.
+
+O segredo tem 32 bytes aleatórios e representação Base64URL de 43 caracteres. A Core transmite ao banco SHA-256 dos bytes ASCII dessa representação; o aceite usa exatamente a mesma transformação. Somente o segredo original é entregue ao destinatário. Nem o segredo nem o hash são retornados em listagens, logs ou DTOs de sucesso. Records de entrada e mensagem possuem `toString` redigido.
+
+Convites usam e-mail integralmente em minúsculas. A regra já existente de cidadãos/estabelecimentos permanece: parte local sensível a maiúsculas e domínio normalizado. Um ADMIN convidado utiliza no login o e-mail em minúsculas informado no convite. O banco impede convite/aceite para e-mail ocupado, inclusive variantes de caixa de contas existentes. Não existe promoção automática.
+
+### Sequência de emissão
+
+1. O controller deriva o autor do JWT; `@PreAuthorize` exige ADMIN.
+2. O serviço exige um `AdminInvitationDelivery` instalado. Nesta primeira sprint ele existe somente nos testes. Sem adapter, retorna 503 ANTES de gravar convite.
+3. Gera novo segredo e chama `AdminInvitationTransactions.issue`, em `REQUIRES_NEW`.
+4. `AdminRegistry` verifica a coordenação oficial e o autor ativo; a função `issue_admin_invitation` revoga o anterior aberto e cria o novo com 24 horas.
+5. Somente depois do commit o serviço chama o adapter de entrega, sem transação de banco aberta.
+6. Sucesso retorna 201, Location e metadados. Falha externa retorna 503 com `ADMIN_INVITATION_DELIVERY_FAILED`; o convite permanece no banco. Consultar antes de reenviar. Uma nova emissão para o mesmo e-mail sempre gera outro segredo e invalida o anterior, inclusive se expirado.
+
+`Propagation.NEVER` impede chamar o orquestrador dentro de outra transação. Não existe retry oculto, segredo armazenado em fila ou transação distribuída com e-mail. A confirmação de entrega significa o retorno bem-sucedido do adapter; o provedor e seus limites serão definidos na segunda sprint.
+
+### Aceite, revogação e status
+
+`POST /api/v1/auth/admin-invitations/acceptance` recebe apenas `token` e `password`, valida Bean Validation e a política existente, calcula Argon2id e chama `accept_admin_invitation`. Nome, e-mail e perfil vêm do convite. O endpoint é público especificamente para permitir o primeiro acesso e compartilha o limite por IP das operações de autenticação. Resposta 204 sem JWT, refresh ou cookie de autenticação.
+
+Revogação utiliza `revoke_admin_invitation`; revogar novamente resulta em 204, mas convite aceito é conflito. Listagens aceitam `state`, `page` (mínimo zero), `size` (1–100; padrão 20), com ordem issued_at/ID decrescente. A situação exibida deriva de aceite, revogação e prazo; AVAILABLE não comprova que o emissor continua ativo. O banco revalida o emissor no aceite.
+
+O endpoint existente de status continua atendendo usuários: para ADMIN usa `set_admin_status`; para os outros perfis mantém UPDATE permitido/auditoria. A garantia do último ADMIN vem da função/trigger do banco. A conta pode inativar a si própria quando outro ADMIN permanece; a trigger revoga suas sessões. Não há contagem/advisory lock alternativo na Core.
+
+### Segurança de consultas e erros
+
+A consulta dos convites seleciona explicitamente as colunas autorizadas. Não há entidade JPA de convite carregando hash nem acesso HTTP a `admin_guard_state`/logs. A criação direta `POST /api/v1/admin/users` foi removida; ADMIN recebe 404 nessa rota. Perfis não administrativos continuam proibidos pela segurança.
+
+A função `lock_admin_registry()` é concedida à Core pelo contrato oficial. O adaptador a usa no início das transações de escrita para verificar e manter a coordenação antes de chamar a função de negócio. Se faltar a linha de controle, a falha permanece interna (500). A chamada seguinte reacquire a mesma trava na mesma transação; incrementos de revision são técnicos, não eventos de negócio.
+
+O tradutor local identifica rejeições intencionais por SQLSTATE e pelo campo estruturado `routine=exec_stmt_raise` do protocolo PostgreSQL 16. Não interpreta mensagens nem WHERE/SQL textuais. Conflitos de convite/status produzem 409; autor conhecido inativo é 403; recurso inexistente é 404. No aceite, emissor inativo é conflito genérico sem dados do emissor. ACL real, controle ausente e falhas desconhecidas permanecem internas. Serialização/deadlock seguem a tradução existente para 409, sem repetição automática.
+
+### Limites da primeira sprint
+
+Há adapter de entrega controlado exclusivamente em testes; não existe envio real, impressão do link no console ou segredo devolvido ao ADMIN. Em execução normal, emissão permanece indisponível até instalar o adapter real da segunda sprint. O aceite pode consumir convites emitidos por implantação autorizada. Provedor/remetente, URL frontend, procedimento completo de bootstrap e homologação de e-mail são a próxima entrega.
+
+Scripts oficiais externos e bancos existentes não foram alterados. A atualização de um ambiente existente deve ser revisada com o responsável pelo banco usando o mecanismo oficial; não executar os scripts de criação sobre uma base pronta.
+
+
+### Exemplos de contrato dos convites
+
+Emissão e reenvio: `POST /api/v1/admin/invitations`, com Bearer de ADMIN ativo. O mesmo e-mail em uma nova emissão substitui o convite anterior aberto.
+
+```json
+{
+  "name": "Nome do administrador",
+  "email": "administrador@example.invalid"
+}
+```
+
+Aceite: `POST /api/v1/auth/admin-invitations/acceptance`, sem login prévio. Os valores abaixo são marcadores; usar o segredo recebido e uma senha que atenda à política.
+
+```json
+{
+  "token": "<segredo recebido no convite>",
+  "password": "<nova senha escolhida pelo destinatário>"
+}
+```
+
+Consulta: `GET /api/v1/admin/invitations?state=AVAILABLE&page=0&size=20`. Estados disponíveis: AVAILABLE, EXPIRED, REVOKED e ACCEPTED. Sem state, retorna todos conforme a paginação. Detalhe: `GET /api/v1/admin/invitations/{id}`. Revogação: `POST /api/v1/admin/invitations/{id}/revocation`, sem corpo. Todas essas consultas/revogação exigem ADMIN ativo e nunca retornam o segredo.
+
+
+### Validação da primeira sprint administrativa — 20/10/2026
+
+A execução completa de `mvnw -o -B verify` passou com 124 testes, sem falhas, erros ou testes ignorados. Após organizar o tradutor local em métodos menores, `AdminInvitationsIntegrationTest` e `AdminAvailabilityIntegrationTest` foram reexecutados: 12 testes, todos aprovados. O Maven gerou o JAR e o relatório JaCoCo nas execuções de validação. A reexecução dirigida tem cobertura parcial; a análise remota deve usar a suíte completa do CI.
+
+A limpeza de target na pasta original encontrou bloqueio de diretório. A validação foi realizada em cópia isolada dos mesmos fontes e pom.xml, com igualdade de conteúdo conferida e sem .env. PostgreSQL 16.15 foi criado e descartado por Testcontainers. Foram conferidos os 14 hashes do manifesto da fixture. Nenhum banco de desenvolvimento/produção ou script oficial externo foi alterado. Não foi executado Sonar nem workflow remoto nesta entrega.
+
+Os testes cobrem explicitamente: uso único concorrente, reenvio/revogação, senha e login, emissor inativo, e-mail ocupado sem diferenciar caixa, erro de entrega após commit, recusa de emissão sem adapter, segredo fora das respostas, ACL real, ausência da linha de coordenação, último ADMIN sob concorrência e regressão das sessões/cadastros existentes.
