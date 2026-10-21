@@ -35,9 +35,5 @@ public final class IdentityRequests {
     public record Refresh(@NotBlank @Pattern(regexp="[A-Za-z0-9_-]{43}") String refreshToken) {
         @Override public String toString() { return "Refresh[redacted]"; }
     }
-    public record AdminRegistration(@NotBlank @Size(max=150) String name,
-        @NotBlank @Email @Size(max=255) String email, @StrongPassword String password) {
-        @Override public String toString() { return "AdminRegistration[redacted]"; }
-    }
     public record StatusChange(@NotNull UserStatus status) { }
 }

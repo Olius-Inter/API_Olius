@@ -64,7 +64,8 @@ public class OpenApiConfiguration {
     private boolean publicPath(String path) {
         return path.startsWith("/api/v1/auth/registrations/")
             || Set.of("/api/v1/auth/mobile/login", "/api/v1/auth/mobile/refresh",
-                "/api/v1/auth/web/csrf", "/api/v1/establishment-types").contains(path);
+                "/api/v1/auth/web/csrf", "/api/v1/establishment-types",
+                "/api/v1/auth/admin-invitations/acceptance").contains(path);
     }
 
     private void documentSecurity(String path, Operation operation) {
@@ -101,7 +102,9 @@ public class OpenApiConfiguration {
         if(path.equals("/api/v1/auth/web/logout")) return "Cookie refresh e CSRF encerram a sessão, sem exigir access válido. Cookie ausente/inválido: 204 idempotente. Falha de banco: erro e cookie removido.";
         if(path.endsWith("/login")) return "Credenciais válidas e conta ativa geram JWT de 15 minutos e sessão renovável.";
         if(path.equals("/api/v1/auth/session")) return "Contrato com a segunda API: encaminhar Bearer do usuário, verificar identidade e revogação online. Retorna dados mínimos.";
-        if(path.startsWith("/api/v1/admin/")) return "Somente ADMIN ativo. Criar administrador ou alterar status, preservando histórico; inativação revoga sessões e não pode remover o último ADMIN ativo (409).";
+        if(path.equals("/api/v1/auth/admin-invitations/acceptance")) return "Aceite público com segredo de uso único e nova senha. Cria ADMIN ativo sem autenticar. Inválido, expirado, usado ou indisponível: conflito. Depois, realizar login normal.";
+        if(path.startsWith("/api/v1/admin/invitations")) return "Somente ADMIN ativo. Convite dura 24 horas; nova emissão para o mesmo e-mail substitui o anterior. Sem serviço de entrega: 503 sem emissão. Falha após commit: ADMIN_INVITATION_DELIVERY_FAILED; consultar antes de reenviar. Nunca retorna o segredo ou hash.";
+        if(path.startsWith("/api/v1/admin/")) return "Somente ADMIN ativo. Alteração de status usa rotina oficial para alvo ADMIN; inativação revoga sessões e preserva o último ADMIN ativo (409).";
         if(path.startsWith("/api/v1/auth/registrations/")) return "Cadastro público atômico, ativo sem confirmação por e-mail. Nenhum privilégio, timestamp, saldo ou status é controlado pelo cliente.";
         if(path.startsWith("/api/v1/users/")) return "Titular consulta o próprio cadastro; ADMIN pode consultar outro usuário. CPF/CNPJ e QR restritos a esse acesso.";
         return "Operação de identidade; consulte docs/identidade-seguranca.md para o fluxo completo.";

@@ -36,6 +36,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<Object> handleApplication(ApiException ex, HttpServletRequest request) {
+        if (factory.status(ex.getCode()).is5xxServerError()) {
+            logFailure(ex, ex.getCode(), factory.status(ex.getCode()), request);
+        }
         return response(ex.getCode(), request);
     }
 
