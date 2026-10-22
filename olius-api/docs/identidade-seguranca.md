@@ -246,3 +246,81 @@ A API impede inativar o último ADMIN ativo com HTTP 409 (`BUSINESS_STATE_CONFLI
 O logout Web valida o refresh pelas funções existentes: rotação e revogação ocorrem na mesma transação, sem entregar ou usar o sucessor. Isso preserva a revogação defensiva quando um refresh consumido é reapresentado, sem liberar acesso direto às tabelas de sessão. Não há alteração de schema.
 
 `Generate-JwtKeys.ps1` exige PowerShell 7. No Windows, a chave privada nasce com herança de permissões desativada e acesso somente ao usuário executor; em sistemas Unix, nasce com modo 0600. Uma conta de serviço diferente precisa receber explicitamente acesso de leitura. O script não sobrescreve arquivos existentes. Na inicialização, a aplicação verifica tamanho, módulo e assinatura/verificação real do par RSA antes de utilizá-lo.
+
+
+## Isolamento da auditoria nas funções de sessão — revisão de 22/10/2026
+
+Quando a API abre, renova ou encerra uma sessão, o banco registra quem realizou a
+operação. Esses dados de autoria são um contexto temporário da transação; não são
+credenciais de autenticação e nunca devem vir livremente do formulário do cliente.
+
+`open_auth_session`, `rotate_auth_refresh_token`, `revoke_auth_session` e
+`revoke_user_auth_sessions` salvam os quatro parâmetros de auditoria recebidos,
+configuram a autoria da operação e restauram os valores antes de sair. A
+restauração cobre sucesso, resultado negativo e exceção. Ausência e string vazia
+representam contexto não informado. Isso protege também chamadas sucessivas na
+mesma transação; limitar um parâmetro à transação, sozinho, não isola duas chamadas.
+
+A revisão remove somente as cláusulas `SET app.*` da definição das quatro funções.
+Mantém `SECURITY DEFINER`, `search_path=pg_catalog, pg_temp`, proprietário interno,
+assinaturas, códigos de resultado e ordem de bloqueio usuário → sessão → token.
+Não é necessário conceder SUPERUSER, GRANT SET ou membership em owners à Core.
+
+`SessionTransactions` continua delimitando as escritas. A rotação confirma o
+resultado `REFRESH_REUSED` antes de `AuthenticationService` responder 401: esse
+resultado negativo precisa preservar a revogação defensiva. Uma exceção SQL é
+outra situação e exige rollback. Restaurar autoria não recupera uma transação
+JDBC abortada. Não existe retry automático de refresh consumido.
+
+`SessionJwtConverter` continua consultando `get_auth_session_status` para cada
+JWT autenticado. A consulta verifica conta/sessão e fornece o perfil atual, sem
+renovar o prazo. Não substituir essa consulta por validação exclusiva da assinatura.
+
+Para cadastros e outras escritas, `AuditContext` continua obrigatório na mesma
+transação e conexão da operação. As funções de sessão restauram o contexto do
+chamador; não deixam uma autoria pronta para a próxima escrita. `REQUIRES_NEW`
+usa uma transação independente e não deve presumir herança do contexto externo.
+
+### Origem da fixture e instalação existente
+
+O script 04 da fixture foi extraído do commit oficial `f1a7bff` do banco. Durante
+esta revisão, o checkout local do banco em main ainda continha a implementação
+anterior. O manifesto registra a origem da correção; os demais scripts mantêm suas
+referências anteriores. Antes de integrar novas cópias, conferir a revisão para não
+reintroduzir as cláusulas antigas. Esta branch preserva a estrutura anterior aos convites administrativos. Somente
+as quatro funções de sessão foram atualizadas; o restante da fixture permanece
+na revisão da main. A validação deve ser repetida nesta base independente.
+
+`scripts/sql/update-auth-audit-context.sql` prepara uma atualização pontual para
+um banco existente. Ele não é executado pelo Spring nem pelo CI em desenvolvimento
+ou produção. Substitui somente as quatro funções, aceita apenas os corpos anterior
+ou corrigido conhecidos e verifica a preservação do owner, ACL e SECURITY DEFINER.
+Uma divergência aborta a transação. A conta de implantação precisa já estar
+autorizada a substituir as funções; o script não concede essa autoridade.
+
+Procedimento: revisar o SQL e o backup, interromper tráfego, confirmar banco e
+conta de implantação, executar o arquivo completo fora de outra transação e
+conferir as quatro funções e permissões antes de reabrir o acesso. Em erro, executar
+ROLLBACK e investigar. Não executar 01_structure.sql sobre o banco existente.
+Se optar por reaplicar o script 04 oficial completo, seguir também a reaplicação de
+access_control/01_roles.sql exigida pelo contrato do banco. A atualização pontual
+preserva e verifica as ACLs existentes e não substitui uma implantação completa.
+
+### Testes e limites
+
+`AuthNonSuperuserInstallationTest` usa outro PostgreSQL descartável, comprova que a
+forma antiga falha com 42501 e instala 01–05 com um dono de banco sem SUPERUSER ou
+SET nos parâmetros. Não concede poderes extras à aplicação. Esse teste não prova
+que o provisionamento completo de roles/owners estará autorizado no Aiven.
+
+`AuthAuditContextIntegrationTest` usa a role restrita da fixture completa para
+verificar sucesso, retornos antecipados, falhas com rollback, reutilização de
+refresh auditada como SYSTEM e reutilização da mesma conexão física por duas
+transações Spring. As consultas administrativas e a trigger de falha existem
+somente na fixture descartável. A suíte existente mantém as regressões HTTP,
+permissões e revogação.
+
+O CI existente executa esses testes por `mvnw verify`; não precisa de outro banco
+fixo nem de novas credenciais. Nenhum teste se conecta ao banco de desenvolvimento
+ou ao Aiven. Aprovação da suíte não comprova implantação no Aiven: é necessário
+conferir a versão e as permissões do ambiente remoto separadamente.
