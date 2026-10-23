@@ -67,7 +67,7 @@ O endereço segue o formato de `IdentityRequests.AddressInput`; a API cria um re
 }
 ```
 
-O token identifica o cidadão, mas não autoriza a operação. O responsável autenticado é `p_validator_id`; o cidadão resolvido é `p_citizen_id`. A mesma chave deve ser repetida com os mesmos dados, inclusive data, após timeout. A inclusão e a política de `deliveryDate` dependem da decisão sobre lançamento retroativo. O volume usa decimal de até duas casas, maior que zero e no máximo `999999.99`, sem arredondamento silencioso. O token de estabelecimento não é beneficiário B2C.
+O token identifica o cidadão, mas não autoriza a operação. O responsável autenticado é `p_validator_id`; o cidadão resolvido é `p_citizen_id`. Após timeout, repetir a mesma chave com **os mesmos dados canônicos após a resolução do QR**: cidadão resolvido, validador autenticado, PEV, volume e `deliveryDate`. A procedure não recebe nem compara o `qrToken` bruto. Se o QR for rotacionado, o novo token pode resolver para o mesmo cidadão e permitir o reenvio da operação original; o token anterior deixa de resolver. Com a mesma chave, cidadão ou validador diferentes são rejeitados como incompatibilidade de autoria (`42501` na procedure), sem revelar os dados da operação original; PEV, volume ou `deliveryDate` diferentes geram conflito de idempotência (`22000`, a traduzir para `409` no contexto do registro). A inclusão e a política de `deliveryDate` dependem da decisão sobre lançamento retroativo. O volume usa decimal de até duas casas, maior que zero e no máximo `999999.99`, sem arredondamento silencioso. O token de estabelecimento não é beneficiário B2C.
 
 ```jsonc
 // POST /api/v1/admin/deliveries/{id}/corrections
