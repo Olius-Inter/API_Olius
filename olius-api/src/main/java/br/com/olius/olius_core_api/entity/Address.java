@@ -31,8 +31,16 @@ public class Address {
     public record Coordinates(BigDecimal latitude, BigDecimal longitude) { }
 
     public Address(UUID id, PostalDetails postal, Coordinates coordinates) {
+        this(id, OwnerKind.ESTABLISHMENT, postal, coordinates);
+    }
+
+    public static Address forPev(UUID id, PostalDetails postal, Coordinates coordinates) {
+        return new Address(id, OwnerKind.PEV, postal, coordinates);
+    }
+
+    private Address(UUID id, OwnerKind kind, PostalDetails postal, Coordinates coordinates) {
         this.id=id;
-        ownerKind=OwnerKind.ESTABLISHMENT;
+        ownerKind=kind;
         state=postal.state(); city=postal.city(); neighborhood=postal.neighborhood();
         street=postal.street(); number=postal.number(); cep=postal.cep(); complement=postal.complement();
         latitude=coordinates.latitude(); longitude=coordinates.longitude();

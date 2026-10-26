@@ -40,4 +40,29 @@ class OpenApiConfigurationTest {
         Schema<?> password = (Schema<?>) api.getComponents().getSchemas().get("Login").getProperties().get("password");
         assertThat(password.getWriteOnly()).isTrue();
     }
+
+    @Test
+    void pevOperationsDocumentPublicListingAndProtectedOwnerActions() {
+        var api = configuration.identityOpenApi();
+        var request = new Operation();
+        var listing = new Operation();
+        var own = new Operation();
+        api.setPaths(new Paths()
+            .addPathItem("/api/v1/pevs", new PathItem().post(request).get(listing))
+            .addPathItem("/api/v1/pevs/me", new PathItem().get(own)));
+
+        configuration.identityContracts().customise(api);
+
+        assertThat(listing.getSecurity()).isEmpty();
+        assertThat(request.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(own.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(request.getSummary()).isEqualTo("Solicitar PEV");
+        assertThat(request.getDescription()).contains("status", "responsável");
+        assertThat(request.getResponses()).containsKeys("201", "400", "401", "409");
+        assertThat(listing.getSummary()).isEqualTo("Listar PEVs aprovados");
+        assertThat(listing.getDescription()).contains("page", "size", "createdAt");
+        assertThat(listing.getResponses()).containsKey("200");
+        assertThat(own.getSummary()).isEqualTo("Consultar próprio PEV");
+        assertThat(own.getResponses()).containsKeys("200", "401", "404");
+    }
 }
