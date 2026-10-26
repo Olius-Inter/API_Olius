@@ -64,7 +64,7 @@ public class OpenApiConfiguration {
     private boolean publicPath(String path) {
         return path.startsWith("/api/v1/auth/registrations/")
             || Set.of("/api/v1/auth/mobile/login", "/api/v1/auth/mobile/refresh",
-                "/api/v1/auth/web/csrf", "/api/v1/establishment-types").contains(path);
+                "/api/v1/auth/web/csrf", "/api/v1/establishment-types", "/api/v1/subscription-plans").contains(path);
     }
 
     private void documentSecurity(String path, Operation operation) {
@@ -96,6 +96,7 @@ public class OpenApiConfiguration {
             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiProblem"))));
     }
     private String description(String path) {
+        if(path.equals("/api/v1/subscription-plans")) return "Consulta pública de planos ativos, ordenados por preço e ID. Preço em BRL; litros e coletas são limites por ciclo mensal. Catálogo vazio retorna []. Não cria cobrança nem concede benefícios; contratação revalida a oferta no servidor.";
         if(path.endsWith("/csrf")) return "Obter token CSRF e cookie; enviar token no header das operações web.";
         if(path.endsWith("/refresh")) return "Rotacionar refresh token. Web usa cookie HttpOnly; Mobile usa corpo JSON. Reutilização revoga a sessão.";
         if(path.equals("/api/v1/auth/web/logout")) return "Cookie refresh e CSRF encerram a sessão, sem exigir access válido. Cookie ausente/inválido: 204 idempotente. Falha de banco: erro e cookie removido.";
