@@ -29,7 +29,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @Testcontainers @AutoConfigureMockMvc
-@SpringBootTest(properties={"spring.config.import=", "olius.security.ephemeral-keys=true",
+@SpringBootTest(properties={"spring.config.import=", "springdoc.api-docs.enabled=true",
+    "olius.security.ephemeral-keys=true",
     "olius.security.auth-requests-per-minute=10000"})
 class PevIntegrationTest {
     @Container static final OfficialPostgres POSTGRES=new OfficialPostgres();
@@ -41,6 +42,18 @@ class PevIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     private static final String PASSWORD="Password1!";
+
+    @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
+        var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
+        var paths=json.readTree(response.getResponse().getContentAsString()).get("paths");
+        var pevs=paths.get("/api/v1/pevs");
+        assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
+        assertThat(pevs.get("post").get("security").toString()).contains("bearer");
+        assertThat(paths.get("/api/v1/pevs/me").get("get").get("security").toString())
+            .contains("bearer");
+        assertThat(pevs.get("get").get("responses").has("200")).isTrue();
+        assertThat(pevs.get("post").get("responses").has("201")).isTrue();
+    }
 
     @Test void citizenRequestsOwnPevAndDuplicateDoesNotLeaveAnAddress() throws Exception {
         var account=citizen(); String access=login(account.email());
@@ -108,6 +121,8 @@ class PevIntegrationTest {
             .andExpect(jsonPath("$.items[1].id").value(approved.get(0).toString()))
             .andExpect(jsonPath("$.items[2].id").value(approved.get(1).toString()))
             .andExpect(jsonPath("$.items[0].address.street").value("Rua do PEV"))
+            .andExpect(jsonPath("$.items[0].address.latitude").value(-23.5505))
+            .andExpect(jsonPath("$.items[0].address.longitude").value(-46.6333))
             .andExpect(jsonPath("$.items[0].citizenId").doesNotExist())
             .andExpect(jsonPath("$.items[0].email").doesNotExist());
         var first=mvc.perform(get("/api/v1/pevs").param("page","0").param("size","2"))
@@ -133,11 +148,15 @@ class PevIntegrationTest {
     @Test void requestRequiresAuthenticationAndRejectsUnknownFields() throws Exception {
         mvc.perform(post("/api/v1/pevs").contentType(MediaType.APPLICATION_JSON).content(request()))
             .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/pevs/me")).andExpect(status().isUnauthorized());
         var account=citizen(); String access=login(account.email());
-        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
-            .contentType(MediaType.APPLICATION_JSON).content(request().replaceFirst("\\}$",
-                ",\"citizenId\":\""+account.id()+"\"}")))
-            .andExpect(status().isBadRequest());
+        for(String field:List.of("\"citizenId\":\""+account.id()+"\"",
+            "\"status\":\"APPROVED\"", "\"approvedBy\":\""+UUID.randomUUID()+"\""))
+            mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+                .contentType(MediaType.APPLICATION_JSON).content(request().replaceFirst("\\}$",","+field+"}")))
+                .andExpect(status().isBadRequest());
+        assertThat(admin().queryForObject("SELECT count(*) FROM pev WHERE citizen_id=?",Long.class,account.id()))
+            .isZero();
         UUID adminId=UUID.randomUUID(); String adminEmail=email();
         var encoder=new org.springframework.security.crypto.argon2.Argon2PasswordEncoder(16,32,1,19456,2);
         admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,?,'ADMIN')",
@@ -147,6 +166,18 @@ class PevIntegrationTest {
             .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/pevs/me").header("Authorization","Bearer "+adminAccess))
             .andExpect(status().isForbidden());
+    }
+
+    @Test void inactiveOwnerCannotUsePreviousTokenToRequestOrConsultPev() throws Exception {
+        var account=citizen(); String access=login(account.email());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",account.id());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/pevs/me").header("Authorization","Bearer "+access))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/pevs")).andExpect(status().isOk());
+        assertThat(admin().queryForObject("SELECT count(*) FROM pev WHERE citizen_id=?",Long.class,account.id()))
+            .isZero();
     }
 
     @Test void concurrentRequestsCreateOnlyOnePevAndOneAddress() throws Exception {
@@ -189,7 +220,9 @@ class PevIntegrationTest {
 
     private String request() throws Exception {
         return json.writeValueAsString(Map.of("address",Map.of("state","SP","city","Cidade",
-            "neighborhood","Bairro","street","Rua do PEV","number","10","cep","01001000")));
+            "neighborhood","Bairro","street","Rua do PEV","number","10","cep","01001000",
+            "latitude",new java.math.BigDecimal("-23.5505"),
+            "longitude",new java.math.BigDecimal("-46.6333"))));
     }
 
     private Map<String,String> commercialAddress() {

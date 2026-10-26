@@ -19,7 +19,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro e identidade. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade e PEV. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -33,10 +33,11 @@ public class OpenApiConfiguration {
             documentProblems(api.getComponents());
             documentPasswords(api.getComponents());
             if (api.getPaths() == null) return;
-            api.getPaths().forEach((path, item) -> item.readOperations().forEach(operation -> {
-                documentSecurity(path, operation);
+            api.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, operation) -> {
+                documentSecurity(path, method, operation);
                 documentResponses(operation);
-                operation.setDescription(description(path));
+                operation.setDescription(description(path, method));
+                documentPevResponse(path, method, operation);
             }));
         };
     }
@@ -61,19 +62,20 @@ public class OpenApiConfiguration {
         });
     }
 
-    private boolean publicPath(String path) {
-        return path.startsWith("/api/v1/auth/registrations/")
+    private boolean publicPath(String path, PathItem.HttpMethod method) {
+        return (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET)
+            || path.startsWith("/api/v1/auth/registrations/")
             || Set.of("/api/v1/auth/mobile/login", "/api/v1/auth/mobile/refresh",
                 "/api/v1/auth/web/csrf", "/api/v1/establishment-types").contains(path);
     }
 
-    private void documentSecurity(String path, Operation operation) {
+    private void documentSecurity(String path, PathItem.HttpMethod method, Operation operation) {
         operation.setSecurity(new ArrayList<>());
         if (path.startsWith("/api/v1/auth/web/") && !path.endsWith("/csrf")) {
             var requirement=new SecurityRequirement().addList(CSRF);
             if (path.endsWith("/refresh") || path.endsWith("/logout")) requirement.addList(REFRESH_COOKIE);
             operation.setSecurity(List.of(requirement));
-        } else if (!publicPath(path)) {
+        } else if (!publicPath(path, method)) {
             operation.addSecurityItem(new SecurityRequirement().addList(BEARER));
         }
     }
@@ -95,7 +97,29 @@ public class OpenApiConfiguration {
         return new ApiResponse().description(description).content(new Content().addMediaType("application/problem+json",
             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiProblem"))));
     }
-    private String description(String path) {
+    private void documentPevResponse(String path, PathItem.HttpMethod method, Operation operation) {
+        if (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.POST) {
+            operation.setSummary("Solicitar PEV");
+            operation.getResponses().computeIfAbsent("201", ignored -> new ApiResponse())
+                .setDescription("PEV PENDING criado; Location aponta para /api/v1/pevs/me.");
+        } else if (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Listar PEVs aprovados");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Página pública com endereço do ponto, sem dados pessoais do responsável.");
+        } else if (path.equals("/api/v1/pevs/me") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Consultar próprio PEV");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("PEV vinculado ao titular autenticado.");
+        }
+    }
+
+    private String description(String path, PathItem.HttpMethod method) {
+        if(path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.POST)
+            return "Cidadão ou estabelecimento ativo solicita um PEV com endereço próprio. O responsável vem do Bearer; status, aprovação e responsável não são aceitos no corpo. Solicitação duplicada retorna 409.";
+        if(path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET)
+            return "Consulta pública de PEVs APPROVED, ordenados por createdAt ASC e id ASC. page começa em 0; size padrão 20 e máximo 100. Deslocamento acima de Integer.MAX_VALUE retorna 400.";
+        if(path.equals("/api/v1/pevs/me") && method == PathItem.HttpMethod.GET)
+            return "Cidadão ou estabelecimento ativo consulta apenas o próprio PEV. Retorna 404 quando ainda não existe solicitação.";
         if(path.endsWith("/csrf")) return "Obter token CSRF e cookie; enviar token no header das operações web.";
         if(path.endsWith("/refresh")) return "Rotacionar refresh token. Web usa cookie HttpOnly; Mobile usa corpo JSON. Reutilização revoga a sessão.";
         if(path.equals("/api/v1/auth/web/logout")) return "Cookie refresh e CSRF encerram a sessão, sem exigir access válido. Cookie ausente/inválido: 204 idempotente. Falha de banco: erro e cookie removido.";
