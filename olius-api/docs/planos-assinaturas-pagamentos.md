@@ -2,7 +2,7 @@
 
 ## Estado desta etapa
 
-A Core API disponibiliza a consulta pública dos planos ativos e a solicitação de um Checkout de contratação inicial em sandbox. Essa solicitação cria uma assinatura pendente e uma cobrança; não libera benefícios. O webhook de confirmação financeira e a aplicação do pagamento também estão implementados para sandbox. A renovação manual e a escolha do plano do próximo ciclo também estão implementadas, com testes de integração. O upgrade pertence à Sprint 7 e será entregue em outra branch. Reconciliação e execução externa de reembolsos pertencem à Sprint 7 e ainda serão desenvolvidas. A expiração de cobranças será organizada junto dessa recuperação financeira; não integra explicitamente o escopo registrado da Sprint 6. A homologação externa registrada neste documento cobre a contratação inicial e a renovação antecipada do mesmo plano. Consultar o catálogo, isoladamente, não cria assinatura ou cobrança.
+A Core API disponibiliza a consulta pública dos planos ativos e a solicitação de um Checkout de contratação inicial em sandbox. Essa solicitação cria uma assinatura pendente e uma cobrança; não libera benefícios. O webhook de confirmação financeira e a aplicação do pagamento também estão implementados para sandbox. A renovação manual e a escolha do plano do próximo ciclo também estão implementadas, com testes de integração. O upgrade do ciclo vigente também está implementado, com testes de integração. Reconciliação e execução externa de reembolsos pertencem à Sprint 7 e ainda serão desenvolvidas. A expiração de cobranças será organizada junto dessa recuperação financeira; não integra explicitamente o escopo registrado da Sprint 6. A homologação externa registrada neste documento cobre a contratação inicial, a renovação antecipada do mesmo plano e o upgrade do ciclo vigente. Consultar o catálogo, isoladamente, não cria assinatura ou cobrança.
 
 ## O que é um plano
 
@@ -348,11 +348,102 @@ A evidência demonstra que pagar antecipadamente reserva o próximo período, se
 
 Os processos temporários da aplicação, da CLI e das páginas de retorno foram encerrados após a confirmação. O volume do banco e os registros foram preservados. Nenhum commit foi criado.
 
-Este ensaio cobre renovação antecipada do mesmo plano. Renovação tardia, escolha de outro plano, concorrência e falhas continuam cobertos pelos testes automatizados; esta execução não afirma homologação externa desses outros cenários. Upgrade, reconciliação de cobranças e execução externa de reembolsos pertencem à Sprint 7 e não integram esta entrega.
+Este ensaio cobre renovação antecipada do mesmo plano. Renovação tardia, escolha de outro plano, concorrência e falhas continuam cobertos pelos testes automatizados; esta execução não afirma homologação externa desses outros cenários. Upgrade pertence à Sprint 7 e está implementado e homologado nesta branch; reconciliação e execução externa de reembolsos permanecem pendentes dessa sprint.
+
+## Upgrade do ciclo vigente
+
+Upgrade aumenta o plano do período que já está em andamento. Ele não cria outro ciclo, não altera o vencimento e não refaz uma renovação futura já paga. A cobrança corresponde à diferença integral entre o preço do plano desejado e o preço contratado no ciclo atual, sem cálculo proporcional aos dias restantes.
+
+Exemplo: um ciclo contratado a R$ 19,90 passa para um plano de R$ 39,90 mediante cobrança de R$ 20,00. Se o preço do plano antigo for alterado no catálogo depois da contratação, a origem continua sendo o preço preservado no ciclo, não o novo preço comercial.
+
+```http
+POST /api/v1/billing/upgrade-checkouts
+Authorization: Bearer <access-token>
+Idempotency-Key: <UUID da tentativa, preservada em reenvios>
+Content-Type: application/json
+```
+
+```json
+{ "planId": "<UUID do plano de destino ativo>" }
+```
+
+### Condições de emissão
+
+A Core identifica o ciclo **vigente** do estabelecimento ativo autenticado. Não utiliza simplesmente o ciclo de maior número: ele pode representar um período futuro já pago, que não deve receber o upgrade atual.
+
+O plano de destino precisa ser ativo, diferente do plano vigente e aumentar **os três valores**: preço mensal, franquia de litros e quantidade de coletas. Mesmo nome ou preço maior isoladamente não basta. Sem ciclo vigente, plano compatível ou prazo suficiente, a operação é recusada antes de criar a cobrança.
+
+Só pode existir uma cobrança de upgrade `OPEN` ou `CANCELLATION_PENDING` por ciclo. Essa restrição é independente da cobrança de contratação/renovação por estabelecimento. Assim, uma renovação do próximo período pode coexistir com um upgrade do atual.
+
+A preparação serializa emissões por estabelecimento. Depois de verificar a vaga de cobrança, a Core relê o ciclo para considerar uma confirmação concorrente que já tenha alterado o plano. Na confirmação financeira, a rotina do PostgreSQL novamente valida o estado e aplica o benefício atomicamente.
+
+### Prazo aprovado para o Checkout
+
+`OLIUS_UPGRADE_CHECKOUT_TTL=1h` define o teto padrão em `olius.payments.upgrade-checkout-ttl`. O prazo efetivo é o menor entre esse teto e o encerramento do ciclo, arredondado para segundos sem ultrapassar o vencimento real.
+
+Foi aprovada a seguinte margem técnica para o MVP: **novos links exigem mais de 35 minutos de validade efetiva**. O provedor exige pelo menos 30 minutos; os cinco minutos adicionais reservam uma margem para preparação e comunicação. A configuração do teto deve superar 35 minutos e não ultrapassar uma hora.
+
+Essa condição vale na emissão. Recuperar um Checkout já emitido não exige novamente 35 minutos: uma tentativa ainda `OPEN` e dentro da validade pode ser consultada com a mesma chave. Reenvios não estendem a expiração nem criam outra cobrança. Um timeout ambíguo mantém a mesma tentativa; seu tratamento segue os mecanismos de recuperação/reconciliação, sem gerar nova chave silenciosamente.
+
+### Cotação e informações antes do pagamento
+
+A resposta preserva os campos comuns `chargeId`, `planId`, `amount`, `currency`, `expiresAt` e `paymentUrl`. Acrescenta o objeto `upgrade`:
+
+- `cycleId` e `cycleEndsAt`: período que será alterado e vencimento preservado.
+- `fromPlanId` e `fromMonthlyPrice`: origem contratada, preservada na cobrança.
+- `targetMonthlyPrice`, `targetVolumeLimitLiters` e `targetCollectionLimit`: condições do destino congeladas na emissão.
+- `currentAvailableVolumeLiters` e `currentAvailableCollectionSlots`: disponibilidade consultada no momento da projeção.
+- `availableVolumeLitersAfterUpgrade` e `availableCollectionSlotsAfterUpgrade`: projeção usando os novos limites e os registros existentes.
+- `availabilityCalculatedAt`: instante de consulta das disponibilidades.
+
+O frontend deve apresentar a diferença de preço, o vencimento e a projeção de franquias **antes de encaminhar o usuário para confirmar o pagamento**. A Core não implementa essa tela.
+
+A projeção consulta `get_cycle_availability` e usa seus componentes de reserva, consumo e perda. Não calcula simplesmente saldo atual mais a diferença de limites, pois um saldo atual limitado a zero pode esconder consumo excedente. Os componentes são subtraídos dos limites de destino e o resultado é limitado a zero.
+
+A disponibilidade é uma consulta datada, não uma reserva de litros ou vagas. Novas operações podem alterá-la durante o pagamento. A cotação financeira fica congelada; a disponibilidade pode ser atualizada em uma consulta/reenvio, sempre acompanhada do instante de cálculo.
+
+### Persistência e identidade
+
+A ordem recebe `UPGRADE` e `target_cycle_id`, sem `previous_cycle_id`. Nesta implementação, `UPGRADE:<ciclo>:<plano de origem>:<plano de destino>` identifica a transição. Reemissões equivalentes dessa transição reutilizam a ordem; upgrades sucessivos, por exemplo Básico → Profissional → um terceiro plano superior, possuem ordens distintas.
+
+A cobrança preserva origem, preço de origem, destino, preço/franquias de destino, diferença cobrada, chave de idempotência e expiração. Não cria novas tabelas nem amplia privilégios. O cliente não escolhe esses valores, o ciclo, o contratante ou a finalidade por campos livres no formulário.
+
+### Aplicação e confirmação tardia
+
+O mesmo webhook verifica o pagamento e chama `apply_verified_payment`. Para um upgrade aplicável, o banco substitui plano, preço e limites do ciclo vigente, registra `subscription_cycle_change` e preserva início, fim, consumo, reservas e os demais registros do período. Os limites não são somados aos antigos.
+
+Exemplo: com 20 litros e uma vaga reservados, o destino de 220 litros e quatro vagas projeta **200 litros e três vagas disponíveis**. A reserva continua vinculada ao mesmo ciclo.
+
+Uma renovação futura paga permanece integralmente preservada, inclusive seu plano e suas condições. O upgrade atual não reescreve esse contrato futuro.
+
+Se o ciclo já terminou quando a confirmação é aplicada, a rotina registra `payment_refund` com motivo `EXPIRED_UPGRADE` e estado `REQUESTED`, sem aplicar o upgrade ou estender o período. Isso não é prova de devolução concluída: a execução externa do reembolso continua pendente da Sprint 7. Dois pagamentos reais do mesmo benefício também seguem o tratamento de duplicidade previsto no banco; repetir apenas uma notificação não representa outro pagamento real.
+
+### Validação desta etapa
+
+Os testes de integração usam PostgreSQL descartável com a conta restrita da Core e Stripe simulada. Cobrem diferença integral, preço histórico de origem, cotação congelada, resposta HTTP, reservas preservadas, renovação futura intacta, limite de validade, margem de emissão, recuperação de link existente, timeout, concorrência, upgrades sucessivos e solicitação de reembolso por confirmação tardia ou pagamento duplicado.
+
+A verificação completa da aplicação passou com 198 testes, sem falhas ou testes ignorados. A homologação externa do upgrade está registrada abaixo.
+
+### Homologação externa do upgrade — 26/10/2026
+
+No sandbox da Stripe, usando exclusivamente o cadastro fictício do banco local, foi pago o Checkout da cobrança `8f5c0a18-142d-45bc-b906-e2299836dbf0`, no valor de R$ 20,00. Esse valor corresponde à diferença integral entre o plano Básico (R$ 19,90) contratado no ciclo e o Profissional (R$ 39,90).
+
+A verificação posterior no PostgreSQL confirmou:
+
+- cobrança `PAID`, com exatamente um pagamento e uma aplicação do benefício;
+- evento do provedor `PROCESSED` na primeira tentativa, sem erro;
+- ciclo vigente atualizado para o Profissional, com 220 litros e 4 coletas;
+- início e fim do ciclo vigente preservados, com término em 26/11/2026;
+- renovação futura integralmente inalterada, mantendo o Básico, 50 litros e 2 coletas, de 26/11/2026 a 26/12/2026;
+- quantidade de ciclos mantida em dois: o upgrade não criou outro período.
+
+O resultado foi confirmado pelos registros do banco, não pelo redirecionamento do navegador. Os processos temporários da aplicação, da Stripe CLI e das páginas locais de retorno foram encerrados após a verificação. Os registros locais de homologação foram preservados; o arquivo `.env` não foi alterado.
+
+Esta homologação externa cobre o caminho de sucesso do upgrade com renovação futura paga. Cenários de confirmação tardia, duplicidade, concorrência e reservas existentes foram verificados nos testes automatizados; não são declarados como homologados externamente nesta execução. Reconciliação/expiração e execução externa de reembolsos continuam pendentes da etapa de recuperação financeira, separada da Sprint 6.
 
 ## Verificação de encerramento da Sprint 6 — contratação e ciclos
 
-A tarefa registrada no ClickUp para a Sprint 6 contempla catálogo, contratação, confirmação financeira, ciclo mensal e renovação manual antecipada ou após interrupção. Upgrade e reembolsos pertencem à Sprint 7; o upgrade desenvolvido antecipadamente foi separado para entrega em outra branch. Pendências da Sprint 7 não devem ser apresentadas como critérios adicionais para concluir a Sprint 6.
+A tarefa registrada no ClickUp para a Sprint 6 contempla catálogo, contratação, confirmação financeira, ciclo mensal e renovação manual antecipada ou após interrupção. Upgrade e reembolsos pertencem à Sprint 7; o upgrade implementado e homologado neste documento é uma antecipação dessa sprint. Pendências da Sprint 7 não devem ser apresentadas como critérios adicionais para concluir a Sprint 6.
 
 Em 26/10/2026 foram executados 45 testes específicos de contratação inicial, renovação e webhook, sem falhas, erros ou testes ignorados. A cobertura dos critérios inclui:
 
@@ -370,4 +461,4 @@ Os testes de calendário executam a rotina real de aplicação do pagamento do P
 
 Contratação inicial e renovação antecipada do mesmo plano também foram homologadas externamente no sandbox da Stripe. Os cenários negativos, de interrupção e de calendário acima são evidências automatizadas com provedor simulado; não representam novas cobranças externas. Publicação no GitHub e resultado do CI devem ser verificados separadamente antes de considerar a entrega publicada.
 
-Resultado da regressão completa de encerramento: 194 testes executados, zero falhas, zero erros e zero testes ignorados. A validação foi executada em cópia isolada dos fontes, com PostgreSQL descartável. Os critérios funcionais verificados da Sprint 6 foram atendidos; commits, PR e CI de publicação permanecem separados desta evidência local.
+Resultado da regressão completa de encerramento: 209 testes executados, zero falhas, zero erros e zero testes ignorados. A validação foi executada em cópia isolada dos fontes, com PostgreSQL descartável. Os critérios funcionais verificados da Sprint 6 foram atendidos; commits, PR e CI de publicação permanecem separados desta evidência local.

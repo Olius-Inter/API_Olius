@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/billing/initial-checkouts")
-@Tag(name="Cobranças",description="Contratação e renovação pelo estabelecimento autenticado")
+@Tag(name="Cobranças",description="Contratação, renovação e upgrade pelo estabelecimento autenticado")
 public class BillingCheckoutController {
     private final InitialCheckoutService checkout;
     public BillingCheckoutController(InitialCheckoutService checkout) { this.checkout=checkout; }

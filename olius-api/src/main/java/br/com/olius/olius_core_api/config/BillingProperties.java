@@ -12,4 +12,5 @@ import org.springframework.context.annotation.Configuration;
 public class BillingProperties {
     private Duration initialCheckoutTtl=Duration.ofHours(1);
     private Duration renewalCheckoutTtl=Duration.ofHours(1);
+    private Duration upgradeCheckoutTtl=Duration.ofHours(1);
 }
