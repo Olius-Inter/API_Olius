@@ -65,4 +65,18 @@ class OpenApiConfigurationTest {
         assertThat(own.getSummary()).isEqualTo("Consultar próprio PEV");
         assertThat(own.getResponses()).containsKeys("200", "401", "404");
     }
+
+    @Test
+    void administrativePevListingRequiresBearerAndHasItsOwnDescription() {
+        var api=configuration.identityOpenApi();
+        var listing=new Operation();
+        api.setPaths(new Paths().addPathItem("/api/v1/admin/pevs",new PathItem().get(listing)));
+
+        configuration.identityContracts().customise(api);
+
+        assertThat(listing.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(listing.getSummary()).isEqualTo("Listar PEVs para gestão administrativa");
+        assertThat(listing.getDescription()).contains("status", "ownerType", "createdAt");
+        assertThat(listing.getResponses()).containsKey("200");
+    }
 }
