@@ -16,9 +16,11 @@ import jakarta.persistence.EntityManager;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class PevService {
@@ -62,6 +64,8 @@ public class PevService {
 
     @Transactional(readOnly=true)
     public PublicPage approved(int page, int size) {
+        if ((long) page * size > Integer.MAX_VALUE)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         var result=pevs.findByStatus(PevStatus.APPROVED,
             PageRequest.of(page,size,Sort.by(Sort.Direction.ASC,"createdAt","id")));
         return new PublicPage(result.stream().map(pev -> new PublicPev(pev.getId(),address(pev.getAddress())))

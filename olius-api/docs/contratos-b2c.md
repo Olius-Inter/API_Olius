@@ -112,7 +112,7 @@ Para `ANNULLED`, o contrato não permite editar volume ou data; o DTO deve rejei
 
 Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `owner_kind=PEV` e um PEV `PENDING` na mesma transação, deriva o responsável do Bearer e retorna `201` com `Location: /api/v1/pevs/me`. `GET /api/v1/pevs/me` devolve `id`, `status`, `createdAt`, `approvedAt` e endereço do próprio responsável; ausência de PEV retorna `404`. Ambos exigem conta ativa `CITIZENS` ou `ESTABLISHMENT`.
 
-`GET /api/v1/pevs` é público e devolve somente PEVs `APPROVED`, com `id` e endereço próprio do ponto, incluindo coordenadas quando cadastradas. A resposta tem `items`, `page`, `size` e `totalElements`; `page` começa em zero, `size` padrão é 20 e máximo é 100. A ordem é `createdAt ASC, id ASC`. Filtros e consulta geográfica permanecem para integração posterior.
+`GET /api/v1/pevs` é público e devolve somente PEVs `APPROVED`, com `id` e endereço próprio do ponto, incluindo coordenadas quando cadastradas. A resposta tem `items`, `page`, `size` e `totalElements`; `page` começa em zero, `size` padrão é 20 e máximo é 100. Combinações cujo deslocamento `page × size` excede `Integer.MAX_VALUE` retornam `400` antes da consulta. A ordem é `createdAt ASC, id ASC`. Filtros e consulta geográfica permanecem para integração posterior.
 
 ## 5. Autorização e transações
 

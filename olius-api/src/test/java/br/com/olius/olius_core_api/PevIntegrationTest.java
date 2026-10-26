@@ -1,6 +1,9 @@
 package br.com.olius.olius_core_api;
 
 import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -78,24 +81,53 @@ class PevIntegrationTest {
         assertThat(admin().queryForObject("SELECT is_pev FROM establishment WHERE id=?",Boolean.class,owner)).isFalse();
     }
 
-    @Test void publicListShowsOnlyApprovedPevAddressWithoutOwnerData() throws Exception {
-        var account=citizen(); String access=login(account.email());
-        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
-            .contentType(MediaType.APPLICATION_JSON).content(request()))
-            .andExpect(status().isCreated()).andReturn();
-        UUID pevId=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
+    @Test void publicListPaginatesApprovedPevsInStableOrderWithoutOwnerData() throws Exception {
+        List<UUID> ids=new ArrayList<>();
+        for(int i=0;i<4;i++) {
+            var account=citizen(); String access=login(account.email());
+            var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+                .contentType(MediaType.APPLICATION_JSON).content(request()))
+                .andExpect(status().isCreated()).andReturn();
+            ids.add(UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText()));
+        }
         mvc.perform(get("/api/v1/pevs")).andExpect(status().isOk())
             .andExpect(jsonPath("$.totalElements").value(0));
         UUID adminId=UUID.randomUUID();
         admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",adminId,email());
-        admin().update("UPDATE pev SET status='APPROVED',approved_at=clock_timestamp(),approved_by=? WHERE id=?",adminId,pevId);
-        mvc.perform(get("/api/v1/pevs").param("size","1")).andExpect(status().isOk())
-            .andExpect(jsonPath("$.items[0].id").value(pevId.toString()))
+        List<UUID> approved=ids.subList(0,3).stream().sorted(Comparator.comparing(UUID::toString)).toList();
+        UUID earliest=approved.get(2);
+        admin().update("UPDATE pev SET status='APPROVED',created_at=TIMESTAMPTZ '2020-01-01 00:00:00+00',approved_at=clock_timestamp(),approved_by=? WHERE id=?",adminId,earliest);
+        for(UUID id:approved.subList(0,2))
+            admin().update("UPDATE pev SET status='APPROVED',created_at=TIMESTAMPTZ '2020-01-02 00:00:00+00',approved_at=clock_timestamp(),approved_by=? WHERE id=?",adminId,id);
+        mvc.perform(get("/api/v1/pevs")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(20))
+            .andExpect(jsonPath("$.totalElements").value(3))
+            .andExpect(jsonPath("$.items.length()").value(3))
+            .andExpect(jsonPath("$.items[0].id").value(earliest.toString()))
+            .andExpect(jsonPath("$.items[1].id").value(approved.get(0).toString()))
+            .andExpect(jsonPath("$.items[2].id").value(approved.get(1).toString()))
             .andExpect(jsonPath("$.items[0].address.street").value("Rua do PEV"))
             .andExpect(jsonPath("$.items[0].citizenId").doesNotExist())
-            .andExpect(jsonPath("$.items[0].email").doesNotExist())
-            .andExpect(jsonPath("$.totalElements").value(1));
+            .andExpect(jsonPath("$.items[0].email").doesNotExist());
+        var first=mvc.perform(get("/api/v1/pevs").param("page","0").param("size","2"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(2)).andExpect(jsonPath("$.totalElements").value(3))
+            .andExpect(jsonPath("$.items.length()").value(2)).andReturn();
+        var second=mvc.perform(get("/api/v1/pevs").param("page","1").param("size","2"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(1))
+            .andExpect(jsonPath("$.size").value(2)).andExpect(jsonPath("$.totalElements").value(3))
+            .andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+        var firstItems=json.readTree(first.getResponse().getContentAsString()).get("items");
+        var secondItems=json.readTree(second.getResponse().getContentAsString()).get("items");
+        assertThat(List.of(firstItems.get(0).get("id").asText(),firstItems.get(1).get("id").asText(),
+            secondItems.get(0).get("id").asText())).containsExactly(
+                earliest.toString(),approved.get(0).toString(),approved.get(1).toString()).doesNotHaveDuplicates();
         mvc.perform(get("/api/v1/pevs").param("size","101")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/pevs").param("size","0")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/pevs").param("page","-1")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/pevs").param("page","2147483647").param("size","20"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
     }
 
     @Test void requestRequiresAuthenticationAndRejectsUnknownFields() throws Exception {
