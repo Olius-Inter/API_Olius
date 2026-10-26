@@ -19,7 +19,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro e identidade. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade e pagamentos B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -64,7 +64,7 @@ public class OpenApiConfiguration {
     private boolean publicPath(String path) {
         return path.startsWith("/api/v1/auth/registrations/")
             || Set.of("/api/v1/auth/mobile/login", "/api/v1/auth/mobile/refresh",
-                "/api/v1/auth/web/csrf", "/api/v1/establishment-types", "/api/v1/subscription-plans").contains(path);
+                "/api/v1/auth/web/csrf", "/api/v1/establishment-types", "/api/v1/subscription-plans", "/api/v1/webhooks/stripe").contains(path);
     }
 
     private void documentSecurity(String path, Operation operation) {
@@ -96,6 +96,9 @@ public class OpenApiConfiguration {
             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiProblem"))));
     }
     private String description(String path) {
+        if(path.equals("/api/v1/billing/renewal-checkouts")) return "Renovação manual pelo estabelecimento ativo. Corpo contém somente planId; Idempotency-Key UUID obrigatório. A Core identifica o ciclo mais recente e permite antecipar somente o próximo período. Não modifica o ciclo atual nem concede benefícios antes da confirmação. Preço/franquias são congelados no PostgreSQL. Reenvio reutiliza a cobrança e o webhook aplica a renovação.";
+        if(path.equals("/api/v1/webhooks/stripe")) return "Entrada exclusiva de eventos Stripe snapshot em sandbox. Não usa JWT; exige Stripe-Signature válida sobre o corpo original. Evento válido é persistido antes do 204. Processamento financeiro ocorre depois, com consulta ao provedor e deduplicação. Não é um endpoint de confirmação manual pelo frontend.";
+        if(path.equals("/api/v1/billing/initial-checkouts")) return "Estabelecimento ativo solicita contratação inicial. Corpo contém somente planId; header Idempotency-Key UUID obrigatório, preservado em reenvios. Preço/franquias vêm do PostgreSQL. Retorna a página Stripe, sem ativar assinatura. Reenvio com mesma chave/plano reutiliza a cobrança; conflito de estado/payload retorna 409. Integração desabilitada ou falha externa retorna 503.";
         if(path.equals("/api/v1/subscription-plans")) return "Consulta pública de planos ativos, ordenados por preço e ID. Preço em BRL; litros e coletas são limites por ciclo mensal. Catálogo vazio retorna []. Não cria cobrança nem concede benefícios; contratação revalida a oferta no servidor.";
         if(path.endsWith("/csrf")) return "Obter token CSRF e cookie; enviar token no header das operações web.";
         if(path.endsWith("/refresh")) return "Rotacionar refresh token. Web usa cookie HttpOnly; Mobile usa corpo JSON. Reutilização revoga a sessão.";
