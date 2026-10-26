@@ -106,7 +106,13 @@ Para `ANNULLED`, o contrato não permite editar volume ou data; o DTO deve rejei
 - **PEV:** `id`, `status`, `address`, `createdAt`; `approvedAt` e dados de responsável somente conforme contexto. A localização pública mostra endereço próprio e coordenadas disponíveis apenas de PEVs aprovados, sem dados pessoais adicionais.
 - **Entrega:** `id`, `pevId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`, `recordStatus`, `revision`. O histórico do PEV deve usar identificador/dados mínimos do beneficiário aprovados para esse contexto.
 - **Pontos:** `balance` geral e movimentações atuais, sem somar revisões antigas. Pontuação anual de ranking não é sinônimo de saldo geral.
-- **Paginação:** definir tamanho padrão/máximo, filtros permitidos, ordenação determinística e formato de cursor ou página antes da implementação.
+- **Paginação:** a listagem pública de PEVs tem contrato inicial abaixo; as demais listas ainda precisam de tamanho, filtros, ordenação e formato final definidos.
+
+### Primeira entrega: solicitação e consultas de PEV
+
+Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `owner_kind=PEV` e um PEV `PENDING` na mesma transação, deriva o responsável do Bearer e retorna `201` com `Location: /api/v1/pevs/me`. `GET /api/v1/pevs/me` devolve `id`, `status`, `createdAt`, `approvedAt` e endereço do próprio responsável; ausência de PEV retorna `404`. Ambos exigem conta ativa `CITIZENS` ou `ESTABLISHMENT`.
+
+`GET /api/v1/pevs` é público e devolve somente PEVs `APPROVED`, com `id` e endereço próprio do ponto, incluindo coordenadas quando cadastradas. A resposta tem `items`, `page`, `size` e `totalElements`; `page` começa em zero, `size` padrão é 20 e máximo é 100. Combinações cujo deslocamento `page × size` excede `Integer.MAX_VALUE` retornam `400` antes da consulta. A ordem é `createdAt ASC, id ASC`. Filtros e consulta geográfica permanecem para integração posterior.
 
 ## 5. Autorização e transações
 
