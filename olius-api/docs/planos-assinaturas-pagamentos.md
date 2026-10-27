@@ -501,7 +501,7 @@ O acompanhamento desta entrega é persistido nas tabelas existentes `payment_ref
 
 Se a criação não devolveu um ID, o resultado pode ser desconhecido: a Stripe pode ter recebido a solicitação e a conexão ter caído antes da resposta. Dentro da janela segura, a Core pode reenviar o mesmo pedido com a mesma chave. O instante de referência é o início da primeira tentativa persistida, não a última repetição e nem a data em que o banco solicitou o reembolso.
 
-Ao atingir 24 horas sem ID externo, novas criações automáticas são suspensas e o pedido recebe `REFUND_RECONCILIATION_REQUIRED`, sem agendamento. A implementação usa uma margem técnica de 30 segundos antes dessa fronteira para não começar uma chamada HTTP junto do limite; o conector também verifica a janela imediatamente antes do POST. Uma repetição não reinicia a contagem.
+Ao atingir 24 horas sem ID externo, novas criações automáticas são suspensas e o pedido recebe `REFUND_RECONCILIATION_REQUIRED`, sem agendamento. O conector admite diferença de até cinco minutos entre o relógio do banco e o da JVM. Para que essa tolerância não amplie a janela segura, a criação usa um limite conservador de 24 horas menos cinco minutos, além de 30 segundos de margem para iniciar o HTTP; o conector também verifica a janela imediatamente antes do POST. Uma repetição não reinicia a contagem.
 
 Esse estado não significa cancelamento nem conclusão da devolução. Exige esclarecer o resultado externo antes de prosseguir. A recuperação operacional descrita abaixo permite consultar um reembolso existente identificado na Stripe; não contornar a proteção inventando uma chave nova ou marcando o reembolso como concluído diretamente.
 
@@ -577,7 +577,7 @@ Essa situação é rastreável pelo estado da cobrança, auditoria e logs técni
 
 ### Contratos preservados
 
-Reemitir uma contratação inicial após expiração efetivamente confirmada cria outra tentativa de cobrança com outra chave, preservando a ordem do benefício. Não conceder dois ciclos para o mesmo benefício. CP permanece bloqueante até confirmação externa compatível.
+Reemitir uma contratação inicial após expiração efetivamente confirmada cria outra tentativa de cobrança com outra chave, preservando a ordem do benefício. Não conceder dois ciclos para o mesmo benefício. O estado `CANCELLATION_PENDING` permanece bloqueante até confirmação externa compatível.
 
 A reconciliação roda pelo sistema e não depende de a conta do estabelecimento ainda estar ativa: fatos financeiros já existentes continuam precisando de acompanhamento. Isso não autoriza o estabelecimento inativo a iniciar contratações ou usar endpoints protegidos.
 
@@ -668,7 +668,7 @@ Nenhuma ação aceita `status`, valor, nova chave idempotente ou declaração de
 2. Na mesma área restrita Stripe utilizada pela aplicação, investigar o pagamento e seus reembolsos. Conferir o metadado `refund_id` correspondente ao ID local.
 3. Se o reembolso existente for identificado, enviar seu `re_...` à ação de reconciliação com justificativa. A Core consulta a Stripe fora da transação e valida PaymentIntent de origem, cobrança, valor integral, moeda e metadado local. O ID sugerido não é persistido antes dessas verificações.
 4. Conferir o estado devolvido e consultar novamente os detalhes. `COMPLETED` só é registrado após `succeeded`; `pending` retoma o acompanhamento automático por esse mesmo ID. Falha definitiva permanece bloqueada para investigação.
-5. Se a consulta falhar ou for incompatível, a tentativa é encerrada como falha, sem associar o ID não verificado nem agendar uma nova criação. Uma nova consulta administrativa pode ser feita após investigar o motivo.
+5. Se a consulta falhar ou for incompatível, a tentativa manual é encerrada como falha, sem associar o ID não verificado. O estado, o agendamento e o diagnóstico anteriores do reembolso são restaurados somente se essa ainda for a tentativa atual. Uma criação já autorizada pode continuar com a mesma chave dentro da janela segura; uma consulta por ID já conhecido também continua. Uma operação previamente bloqueada permanece bloqueada. A consulta administrativa não autoriza outra devolução.
 
 Durante a consulta, a tentativa recebe a marca técnica `REFUND_MANUAL_LOOKUP`. Se o processo parar antes de salvar um ID verificado, o trabalhador encerra a tentativa abandonada e mantém `REFUND_RECONCILIATION_REQUIRED`, sem criar outro reembolso. Se o ID já era conhecido e verificado, a consulta automática desse mesmo ID pode continuar.
 
@@ -704,3 +704,24 @@ Ao consultar o Swagger, os endpoints aparecem com autenticação Bearer e descri
 A regressão completa passou com 301 testes, sem falhas, erros ou testes ignorados, incluindo 17 cenários da recuperação operacional e 19 casos HTTP do conector de reconciliação. Após acrescentar os IDs técnicos da cobrança e do PaymentIntent aos detalhes do reembolso, os 17 cenários operacionais foram reexecutados e o artefato final foi compilado com sucesso. As execuções são distintas; os testes complementares não são somados como novos casos à regressão.
 
 Os cenários verificam acesso administrativo, recusa de conta inativa e perfil indevido, validação HTTP, paginação, ausência de dados pessoais, recuperação de ID existente depois de 24 horas, proibição de trocar identidade, recusa de execução em andamento/concluída, consulta pendente, retorno incompatível, falha de consulta sem novo POST, interrupção manual, resposta antiga, auditoria USER, pagamento concorrente e preservação de uma cobrança incerta. Os testes usam a role limitada do PostgreSQL descartável e HTTP simulado; não criaram novas movimentações financeiras no sandbox externo.
+
+
+## Revisão da PR 16 — correções de recuperação e manutenção
+
+A consulta administrativa por ID não pode remover a elegibilidade automática anterior por causa de timeout, erro de rede ou ID incompatível. A tentativa conserva em memória o estado anterior e o restaura na transação de falha, preservando a autoria e registrando o erro da consulta na tentativa. A gravação continua protegida pelo identificador da tentativa atual. Se o processo morrer antes de restaurar uma consulta sem ID verificado, a marca `REFUND_MANUAL_LOOKUP` continua exigindo investigação; não se presume que o resultado externo seja inexistente.
+
+A diferença tolerada entre os relógios é limitada a cinco minutos. A janela de POST foi reduzida conservadoramente por essa mesma tolerância, além da margem HTTP de 30 segundos, para impedir extensão acidental das 24 horas. Consultas de reembolso por ID conhecido não são limitadas por essa janela de criação. Desvios maiores permanecem sujeitos à revisão técnica; não iniciar outro reembolso nem trocar sua chave como contorno.
+
+O prazo configurado de upgrade é validado durante o boot: deve ser maior que 35 minutos e não ultrapassar uma hora. A emissão continua verificando a disponibilidade real até o fim do ciclo. Configurações inválidas são recusadas antes de atender novas requisições.
+
+Os testes acrescentados verificam falha manual preservando REQUESTED, nova tentativa futura e consulta de ID conhecido, preservação de bloqueios anteriores, respostas antigas, relógio adiantado, limite seguro de criação, configuração inválida no boot, emissão com 36 minutos restantes e concorrência com chaves diferentes.
+
+Os conectores foram separados em etapas de verificação, chamada externa e leitura do resultado. Constantes, expressões regulares e condicionais foram organizadas, e os contratos transacionais e financeiros críticos receberam comentários Javadoc. Nenhuma mudança estrutural de banco, ampliação de permissões ou nova credencial faz parte dessas correções.
+
+### Validação local das correções — 27/10/2026
+
+A suíte completa foi executada com PostgreSQL 16.15 em containers temporários: **333 testes, zero falhas, zero erros e zero testes ignorados**, com `BUILD SUCCESS`. Inclui os cenários novos de recuperação operacional, tolerância de relógio, configuração e concorrência de upgrade. A execução isolada dos testes sem containers também passou: 160 testes.
+
+No encerramento da suíte completa, o Surefire precisou finalizar a JVM após exceder 30 segundos de shutdown; também houve avisos de pools tentando validar conexões de containers já encerrados. Isso não produziu falhas nos testes, mas impede descrever a execução como livre de avisos. Nenhum prazo de encerramento nem configuração de pool foi alterado apenas para ocultar esses registros.
+
+A aprovação atualizada do Sonar e do CodeRabbit depende de uma nova execução no GitHub após a publicação das alterações; o resultado local não substitui essa avaliação.

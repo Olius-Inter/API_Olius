@@ -22,6 +22,7 @@ public class StripeChargeReconciler {
     public StripeChargeReconciler(ChargeReconciliationTransactions transactions,ObjectProvider<ChargeReconciliationGateway> gateways) {
         this.transactions=transactions;this.gateways=gateways;
     }
+    /** Recupera uma página de eventos e de cobranças; falhas de leitura não presumem pagamento ou ausência dele. */
     @Transactional(propagation=Propagation.NEVER)
     public synchronized void processDue() {
         var gateway=gateways.getIfAvailable();if(gateway==null) return;

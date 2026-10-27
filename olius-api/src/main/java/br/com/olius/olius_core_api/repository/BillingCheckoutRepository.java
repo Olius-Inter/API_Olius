@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 /** SQL explícito para respeitar permissões por coluna e defaults protegidos. */
 @Repository
 public class BillingCheckoutRepository {
+    private static final String FIELD_ENDS_AT="ends_at";
     public record Quote(UUID id,String name,String description,BigDecimal price,BigDecimal liters,int slots) { }
     public record Cycle(UUID id,UUID subscriptionId,Instant startsAt,Instant endsAt) { }
     public record UpgradeCycle(UUID id,UUID subscriptionId,Instant endsAt,Quote plan) { }
@@ -97,7 +98,7 @@ public class BillingCheckoutRepository {
                 SELECT id,subscription_id,starts_at,ends_at FROM public.subscription_cycle
                 WHERE establishment_id=? ORDER BY ends_at DESC,starts_at DESC,id DESC LIMIT 1
                 """,(rs,n)->new Cycle(rs.getObject("id",UUID.class),rs.getObject("subscription_id",UUID.class),
-                rs.getTimestamp("starts_at").toInstant(),rs.getTimestamp("ends_at").toInstant()),owner);
+                rs.getTimestamp("starts_at").toInstant(),rs.getTimestamp(FIELD_ENDS_AT).toInstant()),owner);
     }
     public boolean hasAnotherActiveSubscription(UUID owner,UUID subscription) {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
@@ -122,7 +123,7 @@ public class BillingCheckoutRepository {
                 WHERE c.establishment_id=? AND s.status='ACTIVE'
                 AND c.starts_at<=clock_timestamp() AND c.ends_at>clock_timestamp()
                 """,(rs,n)->new UpgradeCycle(rs.getObject("id",UUID.class),rs.getObject("subscription_id",UUID.class),
-                rs.getTimestamp("ends_at").toInstant(),new Quote(rs.getObject("plan_id",UUID.class),
+                rs.getTimestamp(FIELD_ENDS_AT).toInstant(),new Quote(rs.getObject("plan_id",UUID.class),
                 rs.getString("plan_name"),rs.getString("plan_description"),rs.getBigDecimal("monthly_price"),
                 rs.getBigDecimal("volume_limit_liters"),rs.getInt("collection_limit"))),owner);
     }
@@ -166,7 +167,7 @@ public class BillingCheckoutRepository {
                 FROM public.billing_charge b JOIN public.subscription_cycle c ON c.id=b.target_cycle_id
                 CROSS JOIN LATERAL public.get_cycle_availability(c.id) a
                 WHERE b.id=? AND b.establishment_id=? AND b.purpose='UPGRADE'
-                """,(rs,n)->new UpgradeTerms(rs.getObject("target_cycle_id",UUID.class),rs.getTimestamp("ends_at").toInstant(),
+                """,(rs,n)->new UpgradeTerms(rs.getObject("target_cycle_id",UUID.class),rs.getTimestamp(FIELD_ENDS_AT).toInstant(),
                 rs.getObject("from_plan_id",UUID.class),rs.getBigDecimal("from_monthly_price"),rs.getBigDecimal("quoted_monthly_price"),
                 rs.getBigDecimal("quoted_volume_limit_liters"),rs.getInt("quoted_collection_limit"),rs.getBigDecimal("available_volume_liters"),
                 rs.getLong("available_collection_slots"),rs.getBigDecimal("upgraded_liters"),rs.getLong("upgraded_slots"),

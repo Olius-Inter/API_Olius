@@ -105,6 +105,7 @@ class StripeChargeReconciliationGatewayTest {
     @Test void rejectsBrokenPaginationAndDoesNotExposeProviderErrors() {
         server.expect(requestTo(org.hamcrest.Matchers.containsString("/v1/events?")))
             .andRespond(withSuccess("{\"object\":\"list\",\"has_more\":true,\"data\":[]}",MediaType.APPLICATION_JSON));
-        assertThatThrownBy(()->gateway.events(now.minusSeconds(60),now,null)).isInstanceOf(PaymentProviderUnavailableException.class);
+        var from=now.minusSeconds(60);
+        assertThatThrownBy(()->gateway.events(from,now,null)).isInstanceOf(PaymentProviderUnavailableException.class);
     }
 }
