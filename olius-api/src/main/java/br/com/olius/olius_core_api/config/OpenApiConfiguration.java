@@ -112,6 +112,18 @@ public class OpenApiConfiguration {
             operation.setSummary("Consultar próprio PEV");
             operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
                 .setDescription("PEV vinculado ao titular autenticado.");
+        } else if (path.equals("/api/v1/admin/pevs") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Listar PEVs para gestão administrativa");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Página administrativa de PEVs com responsável e endereço do ponto.");
+        } else if (path.equals("/api/v1/admin/pevs/{id}") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Consultar detalhe administrativo de PEV");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Detalhe do PEV com responsável, endereço do ponto e dados de aprovação.");
+        } else if (path.equals("/api/v1/admin/pevs/{id}/status") && method == PathItem.HttpMethod.PATCH) {
+            operation.setSummary("Decidir ou alterar situação do PEV");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Detalhe do PEV após a transição administrativa autorizada.");
         }
     }
 
@@ -128,6 +140,12 @@ public class OpenApiConfiguration {
             return "Consulta pública de PEVs APPROVED, ordenados por createdAt ASC e id ASC. page começa em 0; size padrão 20 e máximo 100. Deslocamento acima de Integer.MAX_VALUE retorna 400.";
         if(path.equals("/api/v1/pevs/me") && method == PathItem.HttpMethod.GET)
             return "Cidadão ou estabelecimento ativo consulta apenas o próprio PEV. Retorna 404 quando ainda não existe solicitação.";
+        if(path.equals("/api/v1/admin/pevs") && method == PathItem.HttpMethod.GET)
+            return "Somente ADMIN ativo. Lista todos os estados, com filtros opcionais status e ownerType (CITIZENS ou ESTABLISHMENT). page começa em 0; size padrão 20 e máximo 100. Ordem createdAt ASC, id ASC. Deslocamento acima de Integer.MAX_VALUE retorna 400.";
+        if(path.equals("/api/v1/admin/pevs/{id}") && method == PathItem.HttpMethod.GET)
+            return "Somente ADMIN ativo. Exibe o responsável e o endereço próprio do PEV, além de approvedAt e approvedBy quando houver aprovação. Não expõe CPF, CNPJ, e-mail, QR nem endereço pessoal. ID inexistente retorna 404.";
+        if(path.equals("/api/v1/admin/pevs/{id}/status") && method == PathItem.HttpMethod.PATCH)
+            return "Somente ADMIN ativo. Corpo: status de destino. Aceita PENDING para APPROVED/REJECTED, APPROVED para INACTIVE e INACTIVE para APPROVED; demais transições retornam 409. Aprovação inicial registra autor/data, inativação e reativação preservam esses dados; a auditoria registra cada ação.";
         if(path.endsWith("/csrf")) return "Obter token CSRF e cookie; enviar token no header das operações web.";
         if(path.endsWith("/refresh")) return "Rotacionar refresh token. Web usa cookie HttpOnly; Mobile usa corpo JSON. Reutilização revoga a sessão.";
         if(path.equals("/api/v1/auth/web/logout")) return "Cookie refresh e CSRF encerram a sessão, sem exigir access válido. Cookie ausente/inválido: 204 idempotente. Falha de banco: erro e cookie removido.";
