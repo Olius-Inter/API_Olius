@@ -7,8 +7,6 @@ import br.com.olius.olius_core_api.entity.enums.PevStatus;
 import br.com.olius.olius_core_api.entity.enums.UserType;
 import br.com.olius.olius_core_api.security.Caller;
 import br.com.olius.olius_core_api.service.PevAdministrationService;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,10 +30,11 @@ public class PevAdministrationController {
     @GetMapping
     public AdminPage list(@RequestParam(required=false) PevStatus status,
                           @RequestParam(required=false) UserType ownerType,
-                          @RequestParam(defaultValue="0") @Min(0) int page,
-                          @RequestParam(defaultValue="20") @Min(1) @Max(100) int size,
+                          @RequestParam(required=false) String page,
+                          @RequestParam(required=false) String size,
                           Authentication authentication) {
-        return service.list(status,ownerType,page,size,Caller.id(authentication));
+        return service.list(status,ownerType,PevPagination.page(page),PevPagination.size(size),
+            Caller.id(authentication));
     }
 
     @GetMapping("/{id}")

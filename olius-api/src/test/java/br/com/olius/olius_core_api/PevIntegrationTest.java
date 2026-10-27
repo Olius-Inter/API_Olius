@@ -140,6 +140,8 @@ class PevIntegrationTest {
                 earliest.toString(),approved.get(0).toString(),approved.get(1).toString()).doesNotHaveDuplicates();
         mvc.perform(get("/api/v1/pevs").param("size","101")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/pevs").param("size","0")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/pevs").param("page","")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/pevs").param("size","")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/pevs").param("page","-1")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/pevs").param("page","2147483647").param("size","20"))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));

@@ -114,6 +114,10 @@ class PevAdministrationIntegrationTest {
             mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
                 .param("size",size)).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
+            .param("page","")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
+            .param("size","")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
             .param("page","-1")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
             .param("page","2147483647").param("size","20")).andExpect(status().isBadRequest());
