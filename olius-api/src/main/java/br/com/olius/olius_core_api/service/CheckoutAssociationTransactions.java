@@ -22,7 +22,7 @@ public class CheckoutAssociationTransactions {
         var charge=bills.lockCharge(expected.id()).stream().findFirst().orElseThrow(ResourceNotFoundException::new);
         if(!charge.ownerId().equals(owner) || !bills.activeOwner(owner)) throw new AccessDeniedException("Titular indisponível");
         requireOpen(charge);
-        if(!charge.amount().equals(expected.amount()) || !charge.key().equals(expected.key())
+        if(charge.amount().compareTo(expected.amount())!=0 || !charge.key().equals(expected.key())
                 || !charge.expiresAt().equals(external.expiresAt())) throw new ResourceConflictException();
         if(charge.providerId()!=null && !charge.providerId().equals(external.providerId())) throw new ResourceConflictException();
         if(charge.providerId()==null) {
