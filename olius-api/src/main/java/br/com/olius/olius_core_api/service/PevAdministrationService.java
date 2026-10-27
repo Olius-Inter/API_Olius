@@ -6,6 +6,7 @@ import br.com.olius.olius_core_api.dto.PevResponses.AdminPev;
 import br.com.olius.olius_core_api.dto.PevResponses.AdminPevDetail;
 import br.com.olius.olius_core_api.entity.enums.PevStatus;
 import br.com.olius.olius_core_api.entity.enums.UserType;
+import br.com.olius.olius_core_api.exception.BusinessRuleException;
 import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -36,8 +37,11 @@ public class PevAdministrationService {
         WHERE 1=1
         """;
     private final JdbcTemplate jdbc;
+    private final AuditContext audit;
 
-    public PevAdministrationService(JdbcTemplate jdbc) { this.jdbc=jdbc; }
+    public PevAdministrationService(JdbcTemplate jdbc, AuditContext audit) {
+        this.jdbc=jdbc; this.audit=audit;
+    }
 
     @Transactional(readOnly=true)
     @PreAuthorize("hasRole('ADMIN')")
@@ -69,6 +73,33 @@ public class PevAdministrationService {
     @PreAuthorize("hasRole('ADMIN')")
     public AdminPevDetail detail(UUID id, UUID actor) {
         requireActiveAdmin(actor);
+        return findDetail(id);
+    }
+
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
+    public AdminPevDetail status(UUID id, PevStatus target, UUID actor) {
+        requireActiveAdmin(actor);
+        var found=jdbc.queryForList("SELECT status::text FROM pev WHERE id=? FOR UPDATE",String.class,id);
+        if(found.isEmpty()) throw new ResourceNotFoundException();
+        PevStatus current=PevStatus.valueOf(found.getFirst());
+        boolean allowed=switch(current) {
+            case PENDING -> target==PevStatus.APPROVED || target==PevStatus.REJECTED;
+            case APPROVED -> target==PevStatus.INACTIVE;
+            case INACTIVE -> target==PevStatus.APPROVED;
+            case REJECTED -> false;
+        };
+        if(!allowed) throw new BusinessRuleException(BusinessRuleException.Reason.STATE_CONFLICT);
+
+        audit.user(actor,"Gestão de PEV: "+current+" -> "+target);
+        if(current==PevStatus.PENDING && target==PevStatus.APPROVED)
+            jdbc.update("UPDATE pev SET status='APPROVED',approved_at=clock_timestamp(),approved_by=? WHERE id=?",actor,id);
+        else
+            jdbc.update("UPDATE pev SET status=CAST(? AS approval_status_t) WHERE id=?",target.name(),id);
+        return findDetail(id);
+    }
+
+    private AdminPevDetail findDetail(UUID id) {
         return jdbc.query(COLUMNS+SOURCE+" AND p.id=?",this::mapDetail,id).stream()
             .findFirst().orElseThrow(ResourceNotFoundException::new);
     }
