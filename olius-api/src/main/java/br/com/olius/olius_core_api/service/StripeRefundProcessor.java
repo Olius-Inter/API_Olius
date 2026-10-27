@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api.service;
 
+import br.com.olius.olius_core_api.integration.payment.RefundFailure;
 import br.com.olius.olius_core_api.integration.payment.RefundGateway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,7 @@ public class StripeRefundProcessor {
     public StripeRefundProcessor(RefundTransactions transactions,ObjectProvider<RefundGateway> gateways) {
         this.transactions=transactions;this.gateways=gateways;
     }
+    /** Processa um lote fora de transação SQL; ID conhecido sempre é consultado em vez de recriado. */
     @Transactional(propagation=Propagation.NEVER)
     public void processDue() {
         var gateway=gateways.getIfAvailable();if(gateway==null) return;
@@ -25,7 +27,7 @@ public class StripeRefundProcessor {
             try {
                 var result=claim.providerId()==null ? gateway.create(claim.request()) : gateway.retrieve(claim.request(),claim.providerId());
                 transactions.complete(claim,result);
-            } catch(RefundGateway.Failure failure) {
+            } catch(RefundFailure failure) {
                 transactions.fail(claim,failure.kind());
                 LOG.warn("Reembolso pendente de recuperação refundId={} kind={}",id,failure.kind());
             } catch(RuntimeException failure) {

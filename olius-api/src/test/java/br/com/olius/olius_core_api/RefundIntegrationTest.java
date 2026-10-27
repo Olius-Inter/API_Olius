@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api;
 
+import br.com.olius.olius_core_api.integration.payment.RefundFailure;
 import br.com.olius.olius_core_api.integration.payment.*;
 import br.com.olius.olius_core_api.integration.payment.RefundGateway.*;
 import br.com.olius.olius_core_api.integration.payment.CheckoutGateway.CheckoutSession;
@@ -103,14 +104,14 @@ class RefundIntegrationTest {
         verify(refunds,times(1)).create(any());verify(refunds).retrieve(any(),eq("re_pending"));
     }
     @Test void timeoutPreservesKeyAndRetriesOnlyAfterTheScheduledTime() {
-        doThrow(new Failure(FailureKind.TEMPORARY)).doReturn(new Result("re_recovered",Status.SUCCEEDED,null)).when(refunds).create(any());
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).doReturn(new Result("re_recovered",Status.SUCCEEDED,null)).when(refunds).create(any());
         processor.processDue();assertThat(state()).isEqualTo("FAILED");processor.processDue();assertThat(attempts()).isEqualTo(1);
         due();processor.processDue();assertThat(state()).isEqualTo("COMPLETED");assertThat(attempts()).isEqualTo(2);
         var requests=org.mockito.ArgumentCaptor.forClass(Request.class);verify(refunds,times(2)).create(requests.capture());
         assertThat(requests.getAllValues().get(0)).isEqualTo(requests.getAllValues().get(1));
     }
     @Test void unknownCreationOlderThan24HoursRequiresReconciliationWithoutAnotherPost() {
-        doThrow(new Failure(FailureKind.TEMPORARY)).when(refunds).create(any());processor.processDue();
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).create(any());processor.processDue();
         owner.update("UPDATE payment_refund_attempt SET started_at=clock_timestamp()-interval '25 hours' WHERE refund_id=?",refundId);
         due();clearInvocations(refunds);processor.processDue();
         assertThat(state()).isEqualTo("FAILED");assertThat(attempts()).isEqualTo(1);
@@ -130,7 +131,7 @@ class RefundIntegrationTest {
         verify(refunds,times(1)).create(any());
     }
     @Test void permanentHttpFailureIsRecordedWithoutLeakingItsDetails() {
-        doThrow(new Failure(FailureKind.REVIEW_REQUIRED)).when(refunds).create(any());processor.processDue();processor.processDue();
+        doThrow(new RefundFailure(FailureKind.REVIEW_REQUIRED)).when(refunds).create(any());processor.processDue();processor.processDue();
         assertThat(attempts()).isEqualTo(1);assertThat(state()).isEqualTo("FAILED");
         assertThat(owner.queryForObject("SELECT error_description FROM payment_refund_attempt WHERE refund_id=?",String.class,refundId)).isEqualTo("REFUND_REVIEW_REQUIRED");
     }

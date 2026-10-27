@@ -70,7 +70,7 @@ class StripeRefundGatewayTest {
     @Test void oldUnknownCreationStopsBeforePosting() {
         var old=new RefundGateway.Request(request.refundId(),request.idempotencyKey(),request.chargeId(),request.paymentId(),request.amount(),NOW.minus(Duration.ofHours(24)));
         expectPayment(payment());
-        assertThatThrownBy(()->gateway.create(old)).isInstanceOfSatisfying(RefundGateway.Failure.class,f->assertThat(f.kind()).isEqualTo(RefundGateway.FailureKind.RECONCILIATION_REQUIRED));
+        assertThatThrownBy(()->gateway.create(old)).isInstanceOfSatisfying(RefundFailure.class,f->assertThat(f.kind()).isEqualTo(RefundGateway.FailureKind.RECONCILIATION_REQUIRED));
         server.verify();
     }
     @ParameterizedTest @ValueSource(strings={"live","unconfirmed","amount","owner","currency"})
@@ -83,7 +83,7 @@ class StripeRefundGatewayTest {
             default -> payment().replace("brl","usd");
         };
         expectPayment(body);
-        assertThatThrownBy(()->gateway.create(request)).isInstanceOfSatisfying(RefundGateway.Failure.class,f->assertThat(f.kind()).isEqualTo(RefundGateway.FailureKind.REVIEW_REQUIRED));server.verify();
+        assertThatThrownBy(()->gateway.create(request)).isInstanceOfSatisfying(RefundFailure.class,f->assertThat(f.kind()).isEqualTo(RefundGateway.FailureKind.REVIEW_REQUIRED));server.verify();
     }
     @ParameterizedTest @ValueSource(strings={"amount","payment","identity","currency","status"})
     void rejectsIncompatibleRefundResults(String mutation) {
@@ -95,26 +95,44 @@ class StripeRefundGatewayTest {
             default -> refund("unexpected");
         };
         expectPayment(payment());server.expect(requestTo("https://api.stripe.com/v1/refunds/re_fixture")).andRespond(withSuccess(body,MediaType.APPLICATION_JSON));
-        assertThatThrownBy(()->gateway.retrieve(request,"re_fixture")).isInstanceOf(RefundGateway.Failure.class);server.verify();
+        assertThatThrownBy(()->gateway.retrieve(request,"re_fixture")).isInstanceOf(RefundFailure.class);server.verify();
     }
     @ParameterizedTest @ValueSource(ints={400,401,403,409,429,500})
     void classifiesFailuresWithoutExposingExternalBodies(int status) {
         expectPayment(payment());server.expect(requestTo("https://api.stripe.com/v1/refunds"))
             .andRespond(withStatus(HttpStatusCode.valueOf(status)).body("sensitive-provider-detail"));
-        assertThatThrownBy(()->gateway.create(request)).isInstanceOfSatisfying(RefundGateway.Failure.class,f->{
+        assertThatThrownBy(()->gateway.create(request)).isInstanceOfSatisfying(RefundFailure.class,f->{
             assertThat(f.kind()).isEqualTo(status==409 || status==429 || status>=500 ? RefundGateway.FailureKind.TEMPORARY : RefundGateway.FailureKind.REVIEW_REQUIRED);
             assertThat(f.getMessage()).doesNotContain("sensitive-provider-detail");assertThat(f.getCause()).isNull();
         });server.verify();
     }
     @Test void networkTimeoutRemainsAnUnknownTemporaryResult() {
         expectPayment(payment());server.expect(requestTo("https://api.stripe.com/v1/refunds")).andRespond(withException(new IOException("sensitive-network-detail")));
-        assertThatThrownBy(()->gateway.create(request)).isInstanceOfSatisfying(RefundGateway.Failure.class,f->{assertThat(f.kind()).isEqualTo(RefundGateway.FailureKind.TEMPORARY);assertThat(f.getCause()).isNull();});
+        assertThatThrownBy(()->gateway.create(request)).isInstanceOfSatisfying(RefundFailure.class,f->{assertThat(f.kind()).isEqualTo(RefundGateway.FailureKind.TEMPORARY);assertThat(f.getCause()).isNull();});
     }
     @Test void refusesTransactionsAndFractionalCentsBeforeNetworkCalls() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
         try { assertThatThrownBy(()->gateway.create(request)).isInstanceOf(IllegalStateException.class); }
         finally { TransactionSynchronizationManager.setActualTransactionActive(false); }
         var invalid=new RefundGateway.Request(request.refundId(),request.idempotencyKey(),request.chargeId(),request.paymentId(),new BigDecimal("19.901"),request.firstAttemptAt());
-        assertThatThrownBy(()->gateway.create(invalid)).isInstanceOf(RefundGateway.Failure.class);
+        assertThatThrownBy(()->gateway.create(invalid)).isInstanceOf(RefundFailure.class);
     }
+    @Test void smallDatabaseClockLeadDoesNotBlockCreatingTheRefund() {
+        var ahead=new RefundGateway.Request(request.refundId(),request.idempotencyKey(),request.chargeId(),request.paymentId(),request.amount(),NOW.plusSeconds(3));
+        expectPayment(payment());server.expect(requestTo("https://api.stripe.com/v1/refunds"))
+            .andExpect(method(HttpMethod.POST)).andRespond(withSuccess(refund("succeeded"),MediaType.APPLICATION_JSON));
+        assertThat(gateway.create(ahead).status()).isEqualTo(RefundGateway.Status.SUCCEEDED);server.verify();
+    }
+    @Test void excessiveDatabaseClockLeadRemainsBlockedWithoutNetworkCalls() {
+        var ahead=new RefundGateway.Request(request.refundId(),request.idempotencyKey(),request.chargeId(),request.paymentId(),request.amount(),NOW.plusSeconds(301));
+        assertThatThrownBy(()->gateway.create(ahead)).isInstanceOfSatisfying(RefundFailure.class,
+            failure->assertThat(failure.kind()).isEqualTo(RefundGateway.FailureKind.REVIEW_REQUIRED));server.verify();
+    }
+    @Test void clockToleranceDoesNotExtendCreationDeadlineAtTheUnsafeBoundary() {
+        var boundary=new RefundGateway.Request(request.refundId(),request.idempotencyKey(),request.chargeId(),request.paymentId(),request.amount(),NOW.minus(Duration.ofHours(24)).plusSeconds(329));
+        expectPayment(payment());
+        assertThatThrownBy(()->gateway.create(boundary)).isInstanceOfSatisfying(RefundFailure.class,
+            failure->assertThat(failure.kind()).isEqualTo(RefundGateway.FailureKind.RECONCILIATION_REQUIRED));server.verify();
+    }
+
 }

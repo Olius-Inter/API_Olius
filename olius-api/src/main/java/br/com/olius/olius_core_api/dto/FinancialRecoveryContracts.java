@@ -9,7 +9,7 @@ import java.util.UUID;
 public final class FinancialRecoveryContracts {
     private FinancialRecoveryContracts() { }
     public record ChargeAction(@NotBlank @Size(min=10,max=240) @Pattern(regexp="[^\\p{Cntrl}]+") String reason) { }
-    public record RefundAction(@NotBlank @Size(max=255) @Pattern(regexp="re_[A-Za-z0-9_]+") String providerRefundId,
+    public record RefundAction(@NotBlank @Size(max=255) @Pattern(regexp="re_\\w+") String providerRefundId,
         @NotBlank @Size(min=10,max=240) @Pattern(regexp="[^\\p{Cntrl}]+") String reason) { }
     public record Charge(UUID id,String status,String providerId,BigDecimal amount,Instant expiresAt,Instant closedAt) { }
     public record Attempt(int number,Instant startedAt,Instant finishedAt,String result,String error) { }

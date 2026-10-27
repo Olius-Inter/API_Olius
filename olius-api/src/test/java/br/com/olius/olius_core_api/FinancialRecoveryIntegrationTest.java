@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api;
 
+import br.com.olius.olius_core_api.integration.payment.RefundFailure;
 import br.com.olius.olius_core_api.integration.payment.*;
 import br.com.olius.olius_core_api.integration.payment.RefundGateway.*;
 import br.com.olius.olius_core_api.integration.payment.CheckoutGateway.CheckoutSession;
@@ -100,7 +101,7 @@ class FinancialRecoveryIntegrationTest {
     private String external(String suffix) { return "re_"+refundId.toString().replace("-","")+"_"+suffix; }
     private String body(String id) { return "{\"providerRefundId\":\""+id+"\",\"reason\":\"Conferência operacional no provedor\"}"; }
     @Test void recoversUnknownRefundAfter24HoursOnlyByConsultingExistingId() {
-        doThrow(new Failure(FailureKind.TEMPORARY)).when(refunds).create(any());processor.processDue();
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).create(any());processor.processDue();
         owner.update("UPDATE payment_refund_attempt SET started_at=clock_timestamp()-interval '25 hours' WHERE refund_id=?",refundId);
         due();processor.processDue();clearInvocations(refunds);
         var result=recovery.reconcileRefund(actor,refundId,external("found"),REASON);
@@ -109,20 +110,63 @@ class FinancialRecoveryIntegrationTest {
         assertThat(owner.queryForObject("SELECT count(*) FROM payment_refund_log WHERE id=? AND actor_kind='USER' AND performed_by=? AND audit_reason=?",Integer.class,refundId,actor,REASON)).isGreaterThan(0);
         assertThat(owner.queryForObject("SELECT count(*) FROM payment_application WHERE establishment_id=?",Integer.class,ownerId)).isEqualTo(1);
     }
-    @Test void lookupFailureNeverStoresUnverifiedIdOrSchedulesAnotherCreation() {
-        doThrow(new Failure(FailureKind.TEMPORARY)).when(refunds).retrieve(any(),anyString());
-        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,external("wrong"),REASON)).isInstanceOf(br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException.class);
-        var result=recovery.refund(actor,refundId);
-        assertThat(result.status()).isEqualTo("FAILED");assertThat(result.providerId()).isNull();assertThat(result.nextAttemptAt()).isNull();
-        processor.processDue();verify(refunds,never()).create(any());
-    }
-    @Test void incompatibleLookupResultIsNotPersistedAndLeavesNoAutomaticCreation() {
-        doReturn(new Result(external("different"),Status.SUCCEEDED,null)).when(refunds).retrieve(any(),anyString());
-        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,external("found"),REASON))
+    @Test void failedLookupPreservesRequestedRefundAndItsAuthorizedCreation() {
+        String wrong=external("wrong");
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).retrieve(any(),anyString());
+        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,wrong,REASON))
             .isInstanceOf(br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException.class);
-        var result=recovery.refund(actor,refundId);assertThat(result.status()).isEqualTo("FAILED");
+        var result=recovery.refund(actor,refundId);
+        assertThat(result.status()).isEqualTo("REQUESTED");assertThat(result.providerId()).isNull();
+        assertThat(result.nextAttemptAt()).isNull();assertThat(result.attempts().getFirst().result()).isEqualTo("FAILED");
+        processor.processDue();assertThat(state()).isEqualTo("COMPLETED");verify(refunds,times(1)).create(any());
+    }
+    @Test void incompatibleLookupResultDoesNotStoreIdentityOrRemoveOriginalEligibility() {
+        String found=external("found");
+        doReturn(new Result(external("different"),Status.SUCCEEDED,null)).when(refunds).retrieve(any(),anyString());
+        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,found,REASON))
+            .isInstanceOf(br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException.class);
+        var result=recovery.refund(actor,refundId);assertThat(result.status()).isEqualTo("REQUESTED");
         assertThat(result.providerId()).isNull();assertThat(result.nextAttemptAt()).isNull();
-        verify(refunds,never()).create(any());
+        processor.processDue();assertThat(state()).isEqualTo("COMPLETED");verify(refunds,times(1)).create(any());
+    }
+    @Test void failedLookupPreservesFutureAutomaticRetryAndIdempotencyKey() {
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).create(any());processor.processDue();
+        var before=recovery.refund(actor,refundId);
+        UUID key=owner.queryForObject("SELECT idempotency_key FROM payment_refund WHERE id=?",UUID.class,refundId);
+        String candidate=external("found");
+        doThrow(new RefundFailure(FailureKind.REVIEW_REQUIRED)).when(refunds).retrieve(any(),anyString());
+        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,candidate,REASON))
+            .isInstanceOf(br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException.class);
+        var after=recovery.refund(actor,refundId);
+        assertThat(after.status()).isEqualTo(before.status());assertThat(after.nextAttemptAt()).isEqualTo(before.nextAttemptAt());
+        assertThat(after.error()).isEqualTo(before.error());assertThat(after.providerId()).isNull();
+        assertThat(owner.queryForObject("SELECT idempotency_key FROM payment_refund WHERE id=?",UUID.class,refundId)).isEqualTo(key);
+        processor.processDue();verify(refunds,times(1)).create(any());
+    }
+    @Test void failedLookupDoesNotReactivateRefundAlreadyBlockedAfter24Hours() {
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).create(any());processor.processDue();
+        owner.update("UPDATE payment_refund_attempt SET started_at=clock_timestamp()-interval '25 hours' WHERE refund_id=?",refundId);
+        due();processor.processDue();clearInvocations(refunds);
+        String candidate=external("found");
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).retrieve(any(),anyString());
+        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,candidate,REASON))
+            .isInstanceOf(br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException.class);
+        var result=recovery.refund(actor,refundId);
+        assertThat(result.status()).isEqualTo("FAILED");assertThat(result.nextAttemptAt()).isNull();
+        assertThat(result.error()).isEqualTo("REFUND_RECONCILIATION_REQUIRED");processor.processDue();verify(refunds,never()).create(any());
+    }
+    @Test void failedManualLookupOfKnownRefundPreservesAutomaticPolling() {
+        String known=external("known");
+        doReturn(new Result(known,Status.PENDING,null)).when(refunds).create(any());processor.processDue();due();
+        var before=recovery.refund(actor,refundId);
+        doThrow(new RefundFailure(FailureKind.TEMPORARY)).when(refunds).retrieve(any(),anyString());
+        assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,known,REASON))
+            .isInstanceOf(br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException.class);
+        var after=recovery.refund(actor,refundId);
+        assertThat(after.status()).isEqualTo("PROCESSING");assertThat(after.providerId()).isEqualTo(known);
+        assertThat(after.nextAttemptAt()).isEqualTo(before.nextAttemptAt());
+        doReturn(new Result(known,Status.SUCCEEDED,null)).when(refunds).retrieve(any(),anyString());processor.processDue();
+        assertThat(state()).isEqualTo("COMPLETED");verify(refunds,times(1)).create(any());
     }
     @Test void refusesReplacingKnownRefundIdentity() {
         owner.update("UPDATE payment_refund SET provider_refund_id=?,status='FAILED',next_attempt_at=NULL WHERE id=?",external("known"),refundId);
@@ -156,7 +200,9 @@ class FinancialRecoveryIntegrationTest {
         var current=transactions.claim(refundId).getFirst();transactions.complete(current,new Result(external("found"),Status.SUCCEEDED,null));
         assertThatThrownBy(()->operational.finishRefund(actor,REASON,old,new Result(external("found"),Status.SUCCEEDED,null)))
             .isInstanceOf(br.com.olius.olius_core_api.exception.ResourceConflictException.class);
+        operational.failRefund(actor,REASON,old);
         assertThat(recovery.refund(actor,refundId).providerId()).isEqualTo(external("found"));
+        assertThat(state()).isEqualTo("COMPLETED");
     }
     @Test void inactiveAdministratorCannotReadOrInitiateRecovery() {
         owner.update("UPDATE users SET status='INACTIVE' WHERE id=?",actor);

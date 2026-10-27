@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api.service;
 
+import br.com.olius.olius_core_api.integration.payment.RefundFailure;
 import br.com.olius.olius_core_api.dto.FinancialRecoveryContracts.*;
 import br.com.olius.olius_core_api.exception.PaymentProviderUnavailableException;
 import br.com.olius.olius_core_api.integration.payment.*;
@@ -23,12 +24,14 @@ public class FinancialRecoveryService {
     public Page<Refund> refunds(UUID actor,UUID after,int size) { return transactions.refunds(actor,after,size); }
     public Charge charge(UUID actor,UUID id) { return transactions.charge(actor,id); }
     public Refund refund(UUID actor,UUID id) { return transactions.refund(actor,id); }
+    /** Consulta o provedor sem transação aberta; a resposta informa o estado local, não uma confirmação manual de pagamento. */
     public Charge reconcileCharge(UUID actor,UUID id,String reason) {
         var gateway=charges.getIfAvailable();if(gateway==null) throw new PaymentProviderUnavailableException();
         var request=transactions.prepareCharge(actor,id,reason);
         var observed=gateway.reconcile(request);transactions.finishCharge(actor,reason,request,observed);
         return transactions.charge(actor,id);
     }
+    /** Consulta exclusivamente o ID existente; erros de GET preservam a elegibilidade anterior e não emitem outro POST. */
     public Refund reconcileRefund(UUID actor,UUID id,String providerId,String reason) {
         var gateway=refunds.getIfAvailable();if(gateway==null) throw new PaymentProviderUnavailableException();
         var claim=transactions.prepareRefund(actor,id,providerId,reason);
@@ -38,7 +41,7 @@ public class FinancialRecoveryService {
             transactions.failRefund(actor,reason,claim);throw new PaymentProviderUnavailableException();
         }
         try { transactions.finishRefund(actor,reason,claim,result); }
-        catch(RefundGateway.Failure failure) { transactions.failRefund(actor,reason,claim);throw new PaymentProviderUnavailableException(); }
+        catch(RefundFailure failure) { transactions.failRefund(actor,reason,claim);throw new PaymentProviderUnavailableException(); }
         catch(RuntimeException failure) { transactions.failRefund(actor,reason,claim);throw failure; }
         return transactions.refund(actor,id);
     }

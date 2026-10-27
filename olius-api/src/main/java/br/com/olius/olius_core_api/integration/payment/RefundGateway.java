@@ -11,11 +11,6 @@ public interface RefundGateway {
     enum Status { SUCCEEDED, PENDING, REQUIRES_ACTION, FAILED, CANCELED }
     record Result(String providerId, Status status, String requestId) { }
     enum FailureKind { TEMPORARY, REVIEW_REQUIRED, RECONCILIATION_REQUIRED }
-    final class Failure extends RuntimeException {
-        private final FailureKind kind;
-        public Failure(FailureKind kind) { super("REFUND_"+kind.name()); this.kind=kind; }
-        public FailureKind kind() { return kind; }
-    }
     Result create(Request request);
     Result retrieve(Request request, String providerId);
 }

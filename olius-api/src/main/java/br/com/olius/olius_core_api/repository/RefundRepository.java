@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api.repository;
 
+import br.com.olius.olius_core_api.integration.payment.RefundFailure;
 import br.com.olius.olius_core_api.integration.payment.RefundGateway;
 import br.com.olius.olius_core_api.integration.payment.RefundGateway.FailureKind;
 import java.sql.Timestamp;
@@ -12,17 +13,26 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class RefundRepository {
-    public record Claim(UUID refundId,UUID attemptId,int number,String providerId,RefundGateway.Request request) { }
+    private static final String FIELD_FAILED="FAILED";
+    /** Estado anterior à consulta manual; não representa uma autorização para criar outra devolução. */
+    public record PreviousState(String status,Instant nextAttemptAt,String error) { }
+    public record Claim(UUID refundId,UUID attemptId,int number,String providerId,RefundGateway.Request request,PreviousState previous) {
+        public Claim(UUID refundId,UUID attemptId,int number,String providerId,RefundGateway.Request request) {
+            this(refundId,attemptId,number,providerId,request,null);
+        }
+    }
     private static final String DUE="""
             ((r.status='REQUESTED' AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp()))
             OR (r.status IN ('PROCESSING','FAILED') AND r.next_attempt_at<=clock_timestamp()))
             """;
     private final JdbcTemplate jdbc;
     public RefundRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
+    /** Seleciona até dez devoluções elegíveis; falhas definitivas sem agenda ficam fora do lote. */
     public List<UUID> due() {
         return jdbc.query("SELECT r.id FROM public.payment_refund r WHERE r.provider='STRIPE' AND "+DUE+
             " ORDER BY r.requested_at,r.id LIMIT 10",(rs,n)->rs.getObject(1,UUID.class));
     }
+    /** Bloqueia uma devolução elegível, encerra tentativas abandonadas e preserva chave e primeira tentativa. */
     public List<Claim> claim(UUID id) {
         var rows=jdbc.queryForList("""
                 SELECT r.id,r.idempotency_key,r.provider_refund_id,r.last_error,r.amount,p.provider_payment_id,p.billing_charge_id
@@ -52,6 +62,7 @@ public class RefundRepository {
             (String)row.get("provider_payment_id"),(java.math.BigDecimal)row.get("amount"),first);
         return List.of(new Claim(id,attempt,number,(String)row.get("provider_refund_id"),request));
     }
+    /** Confere o identificador e a ordem da tentativa sob bloqueio antes de gravar seu resultado. */
     public boolean lockCurrent(Claim claim) {
         return !jdbc.query("""
                 SELECT r.id FROM public.payment_refund r WHERE r.id=? AND r.status='PROCESSING'
@@ -60,16 +71,17 @@ public class RefundRepository {
                 FOR UPDATE OF r
                 """,(rs,n)->rs.getObject(1,UUID.class),claim.refundId(),claim.attemptId()).isEmpty();
     }
+    /** Persiste somente a identidade verificada; conclusão exige sucesso e pending mantém consulta por ID. */
     public void save(Claim claim,RefundGateway.Result result) {
-        if(result==null || result.providerId()==null || !result.providerId().matches("re_[A-Za-z0-9_]+") || result.status()==null
+        if(result==null || result.providerId()==null || !result.providerId().matches("re_\\w+") || result.status()==null
                 || (claim.providerId()!=null && !claim.providerId().equals(result.providerId())))
-            throw new RefundGateway.Failure(FailureKind.REVIEW_REQUIRED);
+            throw new RefundFailure(FailureKind.REVIEW_REQUIRED);
         String state=switch(result.status()) {
             case SUCCEEDED -> "COMPLETED";
             case PENDING -> "PROCESSING";
-            case FAILED,CANCELED,REQUIRES_ACTION -> "FAILED";
+            case FAILED,CANCELED,REQUIRES_ACTION -> FIELD_FAILED;
         };
-        String error="FAILED".equals(state) ? "REFUND_PROVIDER_"+result.status().name() : null;
+        String error=FIELD_FAILED.equals(state) ? "REFUND_PROVIDER_"+result.status().name() : null;
         jdbc.update("""
                 UPDATE public.payment_refund SET provider_refund_id=?,status=?::public.refund_status_t,
                 completed_at=CASE WHEN ?='COMPLETED' THEN clock_timestamp() ELSE NULL END,
@@ -78,13 +90,25 @@ public class RefundRepository {
                 """,result.providerId(),state,state,state,error,claim.refundId());
         finish(claim,state,result.requestId(),error);
     }
+    /** Agenda apenas falhas temporárias; não troca a identidade da operação financeira. */
     public void fail(Claim claim,FailureKind kind) {
         jdbc.update("""
                 UPDATE public.payment_refund SET status='FAILED',next_attempt_at=
                 CASE WHEN ? THEN clock_timestamp()+interval '5 minutes' ELSE NULL END,last_error=? WHERE id=?
                 """,kind==FailureKind.TEMPORARY,"REFUND_"+kind.name(),claim.refundId());
-        finish(claim,"FAILED",null,"REFUND_"+kind.name());
+        finish(claim,FIELD_FAILED,null,"REFUND_"+kind.name());
     }
+    /** Restaura a elegibilidade anterior após falha de GET; a tentativa continua registrada como falha. */
+    public void restoreAfterLookupFailure(Claim claim) {
+        PreviousState previous=claim.previous();
+        if(previous==null) throw new IllegalArgumentException("Consulta manual sem estado anterior");
+        jdbc.update("""
+            UPDATE public.payment_refund SET status=?::public.refund_status_t,
+            next_attempt_at=?,last_error=? WHERE id=?
+            """,previous.status(),previous.nextAttemptAt()==null ? null : Timestamp.from(previous.nextAttemptAt()),previous.error(),claim.refundId());
+        finish(claim,FIELD_FAILED,null,"REFUND_MANUAL_LOOKUP_FAILED");
+    }
+    /** Encerra a tentativa sem reescrever tentativas já finalizadas. */
     private void finish(Claim claim,String state,String requestId,String error) {
         jdbc.update("""
                 UPDATE public.payment_refund_attempt SET finished_at=clock_timestamp(),result_status=?::public.refund_status_t,
