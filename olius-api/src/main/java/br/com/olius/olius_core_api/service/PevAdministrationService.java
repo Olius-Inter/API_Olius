@@ -11,7 +11,6 @@ import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -24,17 +23,35 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class PevAdministrationService {
-    private static final String COLUMNS = """
+    private static final String LIST_QUERY = """
         SELECT p.id,p.status::text AS status,p.created_at,p.updated_at,p.approved_at,
                p.approved_by,u.id AS owner_id,u.user_type::text AS owner_type,u.name AS owner_name,
                a.id AS address_id,a.state,a.city,a.neighborhood,a.street,a.number,
                a.cep,a.complement,a.latitude,a.longitude
-        """;
-    private static final String SOURCE = """
         FROM pev p
         JOIN users u ON u.id = COALESCE(p.citizen_id, p.establishment_id)
         JOIN addresses a ON a.id = p.address_id
-        WHERE 1=1
+        WHERE (CAST(? AS approval_status_t) IS NULL OR p.status = CAST(? AS approval_status_t))
+          AND (CAST(? AS user_type_t) IS NULL OR u.user_type = CAST(? AS user_type_t))
+        ORDER BY p.created_at ASC,p.id ASC
+        LIMIT ? OFFSET ?
+        """;
+    private static final String COUNT_QUERY = """
+        SELECT count(*)
+        FROM pev p
+        JOIN users u ON u.id = COALESCE(p.citizen_id, p.establishment_id)
+        WHERE (CAST(? AS approval_status_t) IS NULL OR p.status = CAST(? AS approval_status_t))
+          AND (CAST(? AS user_type_t) IS NULL OR u.user_type = CAST(? AS user_type_t))
+        """;
+    private static final String DETAIL_QUERY = """
+        SELECT p.id,p.status::text AS status,p.created_at,p.updated_at,p.approved_at,
+               p.approved_by,u.id AS owner_id,u.user_type::text AS owner_type,u.name AS owner_name,
+               a.id AS address_id,a.state,a.city,a.neighborhood,a.street,a.number,
+               a.cep,a.complement,a.latitude,a.longitude
+        FROM pev p
+        JOIN users u ON u.id = COALESCE(p.citizen_id, p.establishment_id)
+        JOIN addresses a ON a.id = p.address_id
+        WHERE p.id=?
         """;
     private final JdbcTemplate jdbc;
     private final AuditContext audit;
@@ -50,22 +67,12 @@ public class PevAdministrationService {
         if(ownerType==UserType.ADMIN || (long)page*size>Integer.MAX_VALUE)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
 
-        StringBuilder source=new StringBuilder(SOURCE);
-        List<Object> parameters=new ArrayList<>();
-        if(status!=null) {
-            source.append(" AND p.status = CAST(? AS approval_status_t)");
-            parameters.add(status.name());
-        }
-        if(ownerType!=null) {
-            source.append(" AND u.user_type = CAST(? AS user_type_t)");
-            parameters.add(ownerType.name());
-        }
-        Long total=jdbc.queryForObject("SELECT count(*) "+source,Long.class,parameters.toArray());
-        List<Object> pageParameters=new ArrayList<>(parameters);
-        pageParameters.add(size);
-        pageParameters.add((long)page*size);
-        List<AdminPev> items=jdbc.query(COLUMNS+source+" ORDER BY p.created_at ASC,p.id ASC LIMIT ? OFFSET ?",
-            this::map, pageParameters.toArray());
+        String statusName=status==null ? null : status.name();
+        String ownerTypeName=ownerType==null ? null : ownerType.name();
+        Long total=jdbc.queryForObject(COUNT_QUERY,Long.class,
+            statusName,statusName,ownerTypeName,ownerTypeName);
+        List<AdminPev> items=jdbc.query(LIST_QUERY,this::map,
+            statusName,statusName,ownerTypeName,ownerTypeName,size,(long)page*size);
         return new AdminPage(items,page,size,total==null ? 0 : total);
     }
 
@@ -100,7 +107,7 @@ public class PevAdministrationService {
     }
 
     private AdminPevDetail findDetail(UUID id) {
-        return jdbc.query(COLUMNS+SOURCE+" AND p.id=?",this::mapDetail,id).stream()
+        return jdbc.query(DETAIL_QUERY,this::mapDetail,id).stream()
             .findFirst().orElseThrow(ResourceNotFoundException::new);
     }
 

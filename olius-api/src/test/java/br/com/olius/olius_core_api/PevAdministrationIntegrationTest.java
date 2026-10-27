@@ -42,6 +42,10 @@ class PevAdministrationIntegrationTest {
         var adminAccount=administrator(); UUID adminId=adminAccount.id();
         String adminAccess=login(adminAccount.email());
         long existing=admin().queryForObject("SELECT count(*) FROM pev",Long.class);
+        long existingCitizens=admin().queryForObject("""
+            SELECT count(*) FROM pev p JOIN users u ON u.id=COALESCE(p.citizen_id,p.establishment_id)
+            WHERE u.user_type='CITIZENS'
+            """,Long.class);
         UUID pending=citizenPev();
         UUID approvedCitizen=citizenPev();
         UUID approvedEstablishment=establishmentPev();
@@ -88,6 +92,11 @@ class PevAdministrationIntegrationTest {
             .param("status","REJECTED"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
             .andExpect(jsonPath("$.items[0].id").value(rejected.toString()));
+        mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
+            .param("ownerType","CITIZENS"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(existingCitizens+2))
+            .andExpect(jsonPath("$.items[0].id").value(pending.toString()))
+            .andExpect(jsonPath("$.items[1].id").value(approvedCitizen.toString()));
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
             .param("page","100").param("size","2"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0))
