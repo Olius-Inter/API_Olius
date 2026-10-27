@@ -6,8 +6,6 @@ import br.com.olius.olius_core_api.dto.PevResponses.PublicPage;
 import br.com.olius.olius_core_api.security.Caller;
 import br.com.olius.olius_core_api.service.PevService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -32,8 +30,8 @@ public class PevController {
     }
 
     @GetMapping
-    public PublicPage approved(@RequestParam(defaultValue="0") @Min(0) int page,
-                               @RequestParam(defaultValue="20") @Min(1) @Max(100) int size) {
-        return service.approved(page,size);
+    public PublicPage approved(@RequestParam(required=false) String page,
+                               @RequestParam(required=false) String size) {
+        return service.approved(PevPagination.page(page),PevPagination.size(size));
     }
 }

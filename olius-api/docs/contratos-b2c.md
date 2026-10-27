@@ -114,6 +114,22 @@ Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `own
 
 `GET /api/v1/pevs` é público e devolve somente PEVs `APPROVED`, com `id` e endereço próprio do ponto, incluindo coordenadas quando cadastradas. A resposta tem `items`, `page`, `size` e `totalElements`; `page` começa em zero, `size` padrão é 20 e máximo é 100. Combinações cujo deslocamento `page × size` excede `Integer.MAX_VALUE` retornam `400` antes da consulta. A ordem é `createdAt ASC, id ASC`. Filtros e consulta geográfica permanecem para integração posterior.
 
+### Gestão administrativa: listagem inicial de PEVs
+
+`GET /api/v1/admin/pevs` exige ADMIN ativo e lista PEVs em todos os estados. Aceita filtros opcionais `status` (`PENDING`, `APPROVED`, `REJECTED`, `INACTIVE`) e `ownerType` (`CITIZENS`, `ESTABLISHMENT`), inclusive combinados. A resposta contém `items`, `page`, `size` e `totalElements`; cada item traz `id`, `status`, `createdAt`, `updatedAt`, `approvedAt`, `ownerId`, `ownerType`, `ownerName` e endereço **do ponto**. Não inclui CPF, CNPJ, e-mail, QR nem endereço pessoal do responsável.
+
+`page` começa em zero, `size` padrão é 20 e máximo é 100; a ordem fixa é `createdAt ASC, id ASC`. Um deslocamento `page × size` acima de `Integer.MAX_VALUE`, parâmetros inválidos ou `ownerType=ADMIN` retornam `400`. Página sem itens retorna `200` com `items` vazio e o total correspondente aos filtros.
+
+### Gestão administrativa: detalhe de PEV
+
+`GET /api/v1/admin/pevs/{id}` exige ADMIN ativo e retorna `id`, `status`, `createdAt`, `updatedAt`, `approvedAt`, `approvedBy`, `ownerId`, `ownerType`, `ownerName` e endereço próprio do ponto. `approvedAt` e `approvedBy` são nulos antes da aprovação. O detalhe não inclui CPF, CNPJ, e-mail, QR ou endereço pessoal do responsável. Um ID de PEV inexistente retorna `404`.
+
+### Gestão administrativa: decisão e mudança de estado
+
+`PATCH /api/v1/admin/pevs/{id}/status` exige ADMIN ativo e recebe apenas `{"status":"APPROVED"}` (ou outro estado de destino). Permite `PENDING → APPROVED/REJECTED`, `APPROVED → INACTIVE` e `INACTIVE → APPROVED`; outras transições, inclusive repetição do mesmo estado e reapresentação de `REJECTED`, retornam `409`. ID inexistente retorna `404`. Sucesso retorna `200` com o detalhe atualizado do PEV.
+
+A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e será implementada no fluxo próprio.
+
 ## 5. Autorização e transações
 
 1. Toda escrita abre transação, deriva a identidade do Bearer, verifica perfil e titularidade e chama `AuditContext.user` antes da alteração.
