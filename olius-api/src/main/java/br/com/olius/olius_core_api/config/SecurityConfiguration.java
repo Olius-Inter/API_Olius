@@ -53,10 +53,12 @@ public class SecurityConfiguration {
             .httpBasic(basic -> basic.disable()).logout(logout -> logout.disable())
             .exceptionHandling(errors -> errors.authenticationEntryPoint(entry).accessDeniedHandler(denied))
             .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers(HttpMethod.POST,"/api/v1/webhooks/stripe").permitAll()
                 .requestMatchers(HttpMethod.POST,"/api/v1/auth/registrations/citizens","/api/v1/auth/registrations/establishments",
                     "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh").permitAll()
-                .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types","/api/v1/pevs",
+                .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types","/api/v1/subscription-plans","/api/v1/pevs",
                     "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
+                .requestMatchers("/api/v1/billing/**").hasRole("ESTABLISHMENT")
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
             .addFilterAt(bearer, BearerTokenAuthenticationFilter.class)
@@ -82,7 +84,7 @@ public class SecurityConfiguration {
     private CorsConfigurationSource cors(SecurityProperties properties) {
         var config=new CorsConfiguration(); config.setAllowedOrigins(properties.getAllowedOrigins());
         config.setAllowCredentials(true); config.setAllowedMethods(List.of("GET","POST","PATCH","DELETE","OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization","Content-Type","X-XSRF-TOKEN"));
+        config.setAllowedHeaders(List.of("Authorization","Content-Type","X-XSRF-TOKEN","Idempotency-Key"));
         config.setExposedHeaders(List.of("X-Request-Id"));
         var source=new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/**",config); return source;
     }

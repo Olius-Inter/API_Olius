@@ -65,7 +65,6 @@ class OpenApiConfigurationTest {
         assertThat(own.getSummary()).isEqualTo("Consultar próprio PEV");
         assertThat(own.getResponses()).containsKeys("200", "401", "404");
     }
-
     @Test
     void administrativePevListingRequiresBearerAndHasItsOwnDescription() {
         var api=configuration.identityOpenApi();
@@ -91,4 +90,34 @@ class OpenApiConfigurationTest {
         assertThat(status.getDescription()).contains("PENDING", "INACTIVE", "409");
         assertThat(status.getResponses()).containsKeys("200", "409");
     }
+
+    @Test
+    void billingAndPevContractsCoexistAfterMainIntegration() {
+        var api = configuration.identityOpenApi();
+        var plans = new Operation();
+        var listing = new Operation();
+        var pevRequest = new Operation();
+        var initial = new Operation();
+        var renewal = new Operation();
+        var webhook = new Operation();
+        api.setPaths(new Paths()
+            .addPathItem("/api/v1/subscription-plans", new PathItem().get(plans))
+            .addPathItem("/api/v1/pevs", new PathItem().get(listing).post(pevRequest))
+            .addPathItem("/api/v1/billing/initial-checkouts", new PathItem().post(initial))
+            .addPathItem("/api/v1/billing/renewal-checkouts", new PathItem().post(renewal))
+            .addPathItem("/api/v1/webhooks/stripe", new PathItem().post(webhook)));
+        configuration.identityContracts().customise(api);
+        assertThat(plans.getSecurity()).isEmpty();
+        assertThat(listing.getSecurity()).isEmpty();
+        assertThat(webhook.getSecurity()).isEmpty();
+        assertThat(pevRequest.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(initial.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(renewal.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(plans.getDescription()).contains("planos ativos");
+        assertThat(initial.getDescription()).contains("contratação inicial");
+        assertThat(renewal.getDescription()).contains("Renovação manual");
+        assertThat(webhook.getDescription()).contains("Stripe-Signature");
+        assertThat(pevRequest.getSummary()).isEqualTo("Solicitar PEV");
+    }
+
 }
