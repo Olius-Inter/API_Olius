@@ -14,6 +14,7 @@ public class UpgradeCheckoutService {
     public UpgradeCheckoutService(UpgradeCheckoutTransactions transactions,CheckoutSessionService sessions) {
         this.transactions=transactions;this.sessions=sessions;
     }
+    /** Coordena a cotação local e o Checkout externo sem manter bloqueios SQL durante a rede. */
     @Transactional(propagation=Propagation.NEVER)
     public UpgradeCheckoutResponse create(UUID owner,UUID planId,UUID key) {
         var gateway=sessions.requireGateway();

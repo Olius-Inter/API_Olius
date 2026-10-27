@@ -14,24 +14,20 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class UpgradeCheckoutTransactions {
-    private static final Duration MINIMUM_WINDOW=Duration.ofMinutes(35);
+    private static final Duration MINIMUM_WINDOW=BillingProperties.UPGRADE_MINIMUM_WINDOW;
     private final BillingCheckoutRepository bills;
     private final AuditContext audit;
     private final BillingProperties properties;
     public UpgradeCheckoutTransactions(BillingCheckoutRepository bills,AuditContext audit,BillingProperties properties) {
         this.bills=bills;this.audit=audit;this.properties=properties;
     }
+    /** Congela a cobrança de diferença após serializar o titular e conferir ciclo, plano e validade. */
     @Transactional
     public Charge prepare(UUID owner,UUID planId,UUID key) {
         if(!bills.lockActiveEstablishment(owner)) throw new AccessDeniedException("Upgrade restrito ao titular ativo");
         var existing=bills.byKey(key);
         if(!existing.isEmpty()) {
-            var stored=existing.getFirst();
-            if(!stored.ownerId().equals(owner) || !stored.planId().equals(planId)
-                    || !"UPGRADE".equals(stored.purpose()) || !"STRIPE".equals(stored.provider()))
-                throw new ResourceConflictException();
-            if(!"OPEN".equals(stored.status()) || !stored.expiresAt().isAfter(bills.currentInstant())) throw conflict();
-            return stored; // Não reaplica a janela mínima à recuperação de link já emitido.
+            return replay(owner,planId,existing.getFirst());
         }
         var first=bills.currentUpgradeCycle(owner).stream().findFirst().orElseThrow(this::conflict);
         if(bills.hasOpenUpgrade(first.id())) throw conflict();
@@ -54,6 +50,15 @@ public class UpgradeCheckoutTransactions {
         UUID order=bills.upgradeOrder(owner,current,target.id());
         return bills.insertUpgrade(owner,order,key,current,target,expires);
     }
+    /** Reenvio recupera a cotação congelada; não exige novamente a margem de nova emissão. */
+    private Charge replay(UUID owner,UUID planId,Charge stored) {
+        if(!stored.ownerId().equals(owner) || !stored.planId().equals(planId)
+                || !"UPGRADE".equals(stored.purpose()) || !"STRIPE".equals(stored.provider()))
+            throw new ResourceConflictException();
+        if(!"OPEN".equals(stored.status()) || !stored.expiresAt().isAfter(bills.currentInstant())) throw conflict();
+        return stored;
+    }
+    /** Lê as condições congeladas e a projeção de disponibilidade; não aplica benefícios. */
     @Transactional(readOnly=true)
     public UpgradeTerms details(UUID owner,UUID charge) { return bills.upgradeTerms(owner,charge); }
     private BusinessRuleException conflict() { return new BusinessRuleException(BusinessRuleException.Reason.STATE_CONFLICT); }

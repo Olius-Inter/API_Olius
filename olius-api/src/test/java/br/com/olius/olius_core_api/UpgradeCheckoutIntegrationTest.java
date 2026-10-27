@@ -116,7 +116,7 @@ class UpgradeCheckoutIntegrationTest {
         assertThat(result.upgrade().availableCollectionSlotsAfterUpgrade()).isEqualTo(4);
         assertThat(owner.queryForObject("SELECT count(*) FROM payment_application WHERE establishment_id=?",Integer.class,ownerId)).isZero();
         var order=owner.queryForMap("SELECT o.purpose::text,o.target_cycle_id,o.previous_cycle_id FROM billing_order o JOIN billing_charge b ON b.billing_order_id=o.id WHERE b.id=?",result.chargeId());
-        assertThat(order.get("purpose")).isEqualTo("UPGRADE");assertThat(order.get("target_cycle_id")).isEqualTo(cycle);
+        assertThat(order).containsEntry("purpose","UPGRADE");assertThat(order.get("target_cycle_id")).isEqualTo(cycle);
         assertThat(order.get("previous_cycle_id")).isNull();
     }
     @Test void confirmationReplacesLimitsAndPreservesDatesAndReservations() {
@@ -156,20 +156,20 @@ class UpgradeCheckoutIntegrationTest {
     }
     @Test void refusesNewCheckoutNearExpiryOrWithoutCurrentCycle() {
         owner.update("UPDATE subscription_cycle SET ends_at=clock_timestamp()+interval '35 minutes' WHERE id=?",cycle);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId1=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId1)).isInstanceOf(BusinessRuleException.class);
         owner.update("UPDATE subscription_cycle SET ends_at=clock_timestamp()-interval '1 second' WHERE id=?",cycle);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId2=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId2)).isInstanceOf(BusinessRuleException.class);
         assertThat(charges()).isZero();verifyNoInteractions(gateway);
     }
     @Test void samePlanAndNonIncreasingPriceOrEitherLimitAreRejected() {
         UUID current=owner.queryForObject("SELECT plan_id FROM subscription_cycle WHERE id=?",UUID.class,cycle);
-        assertThatThrownBy(()->upgrade.create(ownerId,current,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId3=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,current,argumentId3)).isInstanceOf(BusinessRuleException.class);
         owner.update("UPDATE subscription_plan SET monthly_price=19.90 WHERE id=?",plan);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId4=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId4)).isInstanceOf(BusinessRuleException.class);
         owner.update("UPDATE subscription_plan SET monthly_price=39.90,volume_limit_liters=50 WHERE id=?",plan);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId5=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId5)).isInstanceOf(BusinessRuleException.class);
         owner.update("UPDATE subscription_plan SET volume_limit_liters=220,collection_limit=2 WHERE id=?",plan);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId6=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId6)).isInstanceOf(BusinessRuleException.class);
         assertThat(charges()).isZero();verifyNoInteractions(gateway);
     }
     @Test void replayPreservesQuoteAndOriginUsesContractedPriceInsteadOfCatalog() {
@@ -193,11 +193,11 @@ class UpgradeCheckoutIntegrationTest {
     }
     @Test void oneOpenUpgradePerCycleAndKeyCannotChangePurposeOrDestination() {
         UUID key=UUID.randomUUID();var result=upgrade.create(ownerId,plan,key);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
-        assertThatThrownBy(()->upgrade.create(ownerId,UUID.randomUUID(),key)).isInstanceOf(ResourceConflictException.class);
+        UUID argumentId7=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId7)).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId8=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,argumentId8,key)).isInstanceOf(ResourceConflictException.class);
         assertThatThrownBy(()->renewal.create(ownerId,plan,key)).isInstanceOf(ResourceConflictException.class);
         owner.update("UPDATE billing_charge SET status='CANCELLATION_PENDING' WHERE id=?",result.chargeId());
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(BusinessRuleException.class);
+        UUID argumentId9=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId9)).isInstanceOf(BusinessRuleException.class);
     }
     @Test void concurrentRetriesDoNotCreateAnotherChargeOrBenefitOrder() throws Exception {
         UUID key=UUID.randomUUID();var start=new CountDownLatch(1);
@@ -217,7 +217,7 @@ class UpgradeCheckoutIntegrationTest {
         assertThat(owner.queryForObject("SELECT count(*) FROM payment_application WHERE establishment_id=?",Integer.class,ownerId)).isZero();
         assertThat(owner.queryForObject("SELECT count(*) FROM subscription_cycle_change WHERE cycle_id=?",Integer.class,cycle)).isZero();
         var refund=owner.queryForMap("SELECT r.reason::text,r.status::text,r.amount FROM payment_refund r JOIN payment p ON p.id=r.payment_id WHERE p.billing_charge_id=?",result.chargeId());
-        assertThat(refund.get("reason")).isEqualTo("EXPIRED_UPGRADE");assertThat(refund.get("status")).isEqualTo("REQUESTED");
+        assertThat(refund).containsEntry("reason","EXPIRED_UPGRADE");assertThat(refund).containsEntry("status","REQUESTED");
         assertThat((BigDecimal)refund.get("amount")).isEqualByComparingTo("20");
     }
     @Test void subsequentUpgradeUsesNewContractPriceAndDistinctTransformationOrder() {
@@ -236,9 +236,9 @@ class UpgradeCheckoutIntegrationTest {
     }
     @Test void inactivePlanOrOwnerCannotStartUpgrade() {
         owner.update("UPDATE subscription_plan SET status='INACTIVE' WHERE id=?",plan);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(ResourceNotFoundException.class);
+        UUID argumentId10=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId10)).isInstanceOf(ResourceNotFoundException.class);
         owner.update("UPDATE users SET status='INACTIVE' WHERE id=?",ownerId);
-        assertThatThrownBy(()->upgrade.create(ownerId,plan,UUID.randomUUID())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        UUID argumentId11=UUID.randomUUID();assertThatThrownBy(()->upgrade.create(ownerId,plan,argumentId11)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         assertThat(charges()).isZero();verifyNoInteractions(gateway);
     }
     @Test void endpointReturnsUpgradeTermsAndRejectsFieldsControlledByServer() throws Exception {
@@ -259,4 +259,27 @@ class UpgradeCheckoutIntegrationTest {
                 .andExpect(jsonPath("$.upgrade.targetMonthlyPrice").value(39.90))
                 .andExpect(jsonPath("$.upgrade.availabilityCalculatedAt").isNotEmpty());
     }
+    @Test void acceptsNewLinkJustAboveTheMinimumAndCapsItAtTheCycleEnd() {
+        Instant end=Instant.now().plusSeconds(36*60).truncatedTo(ChronoUnit.SECONDS);
+        owner.update("UPDATE subscription_cycle SET ends_at=? WHERE id=?",Timestamp.from(end),cycle);
+        var result=upgrade.create(ownerId,plan,UUID.randomUUID());
+        assertThat(result.expiresAt()).isEqualTo(end);assertThat(charges()).isEqualTo(1);
+    }
+    @Test void concurrentDifferentKeysAllowOnlyOneOpenUpgrade() throws Exception {
+        UUID firstKey=UUID.randomUUID();UUID secondKey=UUID.randomUUID();
+        var start=new CountDownLatch(1);
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            var a=pool.submit(()->{start.await();return concurrentUpgrade(firstKey);});
+            var b=pool.submit(()->{start.await();return concurrentUpgrade(secondKey);});
+            start.countDown();
+            assertThat(List.of(a.get(25,TimeUnit.SECONDS),b.get(25,TimeUnit.SECONDS))).containsExactlyInAnyOrder("CREATED","CONFLICT");
+        }
+        assertThat(charges()).isEqualTo(1);
+        assertThat(owner.queryForObject("SELECT count(*) FROM billing_order WHERE target_cycle_id=?",Integer.class,cycle)).isEqualTo(1);
+    }
+    private String concurrentUpgrade(UUID key) {
+        try { upgrade.create(ownerId,plan,key);return "CREATED"; }
+        catch(BusinessRuleException expected) { return "CONFLICT"; }
+    }
+
 }
