@@ -3,8 +3,10 @@ package br.com.olius.olius_core_api.service;
 import br.com.olius.olius_core_api.dto.IdentityResponses.AddressView;
 import br.com.olius.olius_core_api.dto.PevResponses.AdminPage;
 import br.com.olius.olius_core_api.dto.PevResponses.AdminPev;
+import br.com.olius.olius_core_api.dto.PevResponses.AdminPevDetail;
 import br.com.olius.olius_core_api.entity.enums.PevStatus;
 import br.com.olius.olius_core_api.entity.enums.UserType;
+import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
@@ -21,6 +23,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class PevAdministrationService {
+    private static final String COLUMNS = """
+        SELECT p.id,p.status::text AS status,p.created_at,p.updated_at,p.approved_at,
+               p.approved_by,u.id AS owner_id,u.user_type::text AS owner_type,u.name AS owner_name,
+               a.id AS address_id,a.state,a.city,a.neighborhood,a.street,a.number,
+               a.cep,a.complement,a.latitude,a.longitude
+        """;
     private static final String SOURCE = """
         FROM pev p
         JOIN users u ON u.id = COALESCE(p.citizen_id, p.establishment_id)
@@ -34,10 +42,7 @@ public class PevAdministrationService {
     @Transactional(readOnly=true)
     @PreAuthorize("hasRole('ADMIN')")
     public AdminPage list(PevStatus status, UserType ownerType, int page, int size, UUID actor) {
-        boolean active=Boolean.TRUE.equals(jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND user_type='ADMIN' AND status='ACTIVE')",
-            Boolean.class,actor));
-        if(!active) throw new AccessDeniedException("Administrador inativo");
+        requireActiveAdmin(actor);
         if(ownerType==UserType.ADMIN || (long)page*size>Integer.MAX_VALUE)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
 
@@ -55,14 +60,31 @@ public class PevAdministrationService {
         List<Object> pageParameters=new ArrayList<>(parameters);
         pageParameters.add(size);
         pageParameters.add((long)page*size);
-        List<AdminPev> items=jdbc.query("""
-            SELECT p.id,p.status::text AS status,p.created_at,p.updated_at,p.approved_at,
-                   u.id AS owner_id,u.user_type::text AS owner_type,u.name AS owner_name,
-                   a.id AS address_id,a.state,a.city,a.neighborhood,a.street,a.number,
-                   a.cep,a.complement,a.latitude,a.longitude
-            """+source+" ORDER BY p.created_at ASC,p.id ASC LIMIT ? OFFSET ?",
+        List<AdminPev> items=jdbc.query(COLUMNS+source+" ORDER BY p.created_at ASC,p.id ASC LIMIT ? OFFSET ?",
             this::map, pageParameters.toArray());
         return new AdminPage(items,page,size,total==null ? 0 : total);
+    }
+
+    @Transactional(readOnly=true)
+    @PreAuthorize("hasRole('ADMIN')")
+    public AdminPevDetail detail(UUID id, UUID actor) {
+        requireActiveAdmin(actor);
+        return jdbc.query(COLUMNS+SOURCE+" AND p.id=?",this::mapDetail,id).stream()
+            .findFirst().orElseThrow(ResourceNotFoundException::new);
+    }
+
+    private void requireActiveAdmin(UUID actor) {
+        boolean active=Boolean.TRUE.equals(jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND user_type='ADMIN' AND status='ACTIVE')",
+            Boolean.class,actor));
+        if(!active) throw new AccessDeniedException("Administrador inativo");
+    }
+
+    private AdminPevDetail mapDetail(ResultSet rs, int row) throws SQLException {
+        AdminPev summary=map(rs,row);
+        return new AdminPevDetail(summary.id(),summary.status(),summary.createdAt(),
+            summary.updatedAt(),summary.approvedAt(),rs.getObject("approved_by",UUID.class),
+            summary.ownerId(),summary.ownerType(),summary.ownerName(),summary.address());
     }
 
     private AdminPev map(ResultSet rs, int row) throws SQLException {

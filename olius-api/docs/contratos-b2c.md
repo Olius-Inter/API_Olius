@@ -118,7 +118,11 @@ Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `own
 
 `GET /api/v1/admin/pevs` exige ADMIN ativo e lista PEVs em todos os estados. Aceita filtros opcionais `status` (`PENDING`, `APPROVED`, `REJECTED`, `INACTIVE`) e `ownerType` (`CITIZENS`, `ESTABLISHMENT`), inclusive combinados. A resposta contém `items`, `page`, `size` e `totalElements`; cada item traz `id`, `status`, `createdAt`, `updatedAt`, `approvedAt`, `ownerId`, `ownerType`, `ownerName` e endereço **do ponto**. Não inclui CPF, CNPJ, e-mail, QR nem endereço pessoal do responsável.
 
-`page` começa em zero, `size` padrão é 20 e máximo é 100; a ordem fixa é `createdAt ASC, id ASC`. Um deslocamento `page × size` acima de `Integer.MAX_VALUE`, parâmetros inválidos ou `ownerType=ADMIN` retornam `400`. Página sem itens retorna `200` com `items` vazio e o total correspondente aos filtros. Detalhe e mudança de estado administrativos serão tratados nas próximas etapas.
+`page` começa em zero, `size` padrão é 20 e máximo é 100; a ordem fixa é `createdAt ASC, id ASC`. Um deslocamento `page × size` acima de `Integer.MAX_VALUE`, parâmetros inválidos ou `ownerType=ADMIN` retornam `400`. Página sem itens retorna `200` com `items` vazio e o total correspondente aos filtros.
+
+### Gestão administrativa: detalhe de PEV
+
+`GET /api/v1/admin/pevs/{id}` exige ADMIN ativo e retorna `id`, `status`, `createdAt`, `updatedAt`, `approvedAt`, `approvedBy`, `ownerId`, `ownerType`, `ownerName` e endereço próprio do ponto. `approvedAt` e `approvedBy` são nulos antes da aprovação. O detalhe não inclui CPF, CNPJ, e-mail, QR ou endereço pessoal do responsável. Um ID de PEV inexistente retorna `404`. Mudanças de estado permanecem para a etapa seguinte.
 
 ## 5. Autorização e transações
 

@@ -41,6 +41,7 @@ class PevAdministrationIntegrationTest {
     @Test void adminListsAllStatusesWithStablePagesAndFilters() throws Exception {
         var adminAccount=administrator(); UUID adminId=adminAccount.id();
         String adminAccess=login(adminAccount.email());
+        long existing=admin().queryForObject("SELECT count(*) FROM pev",Long.class);
         UUID pending=citizenPev();
         UUID approvedCitizen=citizenPev();
         UUID approvedEstablishment=establishmentPev();
@@ -52,7 +53,7 @@ class PevAdministrationIntegrationTest {
 
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess))
             .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
-            .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(4))
+            .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(existing+4))
             .andExpect(jsonPath("$.items[0].id").value(pending.toString()))
             .andExpect(jsonPath("$.items[1].id").value(approvedCitizen.toString()))
             .andExpect(jsonPath("$.items[2].id").value(approvedEstablishment.toString()))
@@ -66,7 +67,7 @@ class PevAdministrationIntegrationTest {
 
         var first=mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
             .param("page","0").param("size","2")).andExpect(status().isOk())
-            .andExpect(jsonPath("$.totalElements").value(4)).andExpect(jsonPath("$.items.length()").value(2))
+            .andExpect(jsonPath("$.totalElements").value(existing+4)).andExpect(jsonPath("$.items.length()").value(2))
             .andReturn();
         var second=mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
             .param("page","1").param("size","2")).andExpect(status().isOk())
@@ -88,9 +89,9 @@ class PevAdministrationIntegrationTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
             .andExpect(jsonPath("$.items[0].id").value(rejected.toString()));
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
-            .param("page","3").param("size","2"))
+            .param("page","100").param("size","2"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0))
-            .andExpect(jsonPath("$.totalElements").value(4));
+            .andExpect(jsonPath("$.totalElements").value(existing+4));
     }
 
     @Test void listRequiresActiveAdministratorAndValidParameters() throws Exception {
@@ -112,6 +113,53 @@ class PevAdministrationIntegrationTest {
         admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",adminId);
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess))
             .andExpect(status().isUnauthorized());
+    }
+
+    @Test void detailShowsCitizenAndEstablishmentOwnersWithApprovalData() throws Exception {
+        var adminAccount=administrator(); UUID adminId=adminAccount.id();
+        String adminAccess=login(adminAccount.email());
+        UUID citizenPev=citizenPev();
+        UUID establishmentPev=establishmentPev();
+        setState(citizenPev,"APPROVED",9,adminId);
+        UUID citizenOwner=admin().queryForObject("SELECT citizen_id FROM pev WHERE id=?",UUID.class,citizenPev);
+        UUID establishmentOwner=admin().queryForObject(
+            "SELECT establishment_id FROM pev WHERE id=?",UUID.class,establishmentPev);
+
+        mvc.perform(get("/api/v1/admin/pevs/{id}",citizenPev)
+            .header("Authorization","Bearer "+adminAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(citizenPev.toString()))
+            .andExpect(jsonPath("$.status").value("APPROVED"))
+            .andExpect(jsonPath("$.approvedBy").value(adminId.toString()))
+            .andExpect(jsonPath("$.approvedAt").isNotEmpty())
+            .andExpect(jsonPath("$.ownerId").value(citizenOwner.toString()))
+            .andExpect(jsonPath("$.ownerType").value("CITIZENS"))
+            .andExpect(jsonPath("$.ownerName").value("Cidadão PEV"))
+            .andExpect(jsonPath("$.address.street").value("Rua do PEV"))
+            .andExpect(jsonPath("$.email").doesNotExist())
+            .andExpect(jsonPath("$.cpf").doesNotExist());
+        mvc.perform(get("/api/v1/admin/pevs/{id}",establishmentPev)
+            .header("Authorization","Bearer "+adminAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PENDING"))
+            .andExpect(jsonPath("$.approvedBy").doesNotExist())
+            .andExpect(jsonPath("$.approvedAt").doesNotExist())
+            .andExpect(jsonPath("$.ownerId").value(establishmentOwner.toString()))
+            .andExpect(jsonPath("$.ownerType").value("ESTABLISHMENT"))
+            .andExpect(jsonPath("$.ownerName").value("Estabelecimento PEV"));
+    }
+
+    @Test void detailRequiresActiveAdminAndReturnsNotFoundForUnknownPev() throws Exception {
+        UUID missing=UUID.randomUUID();
+        mvc.perform(get("/api/v1/admin/pevs/{id}",missing)).andExpect(status().isUnauthorized());
+        var citizenAccount=citizen(); String citizenAccess=login(citizenAccount.email());
+        mvc.perform(get("/api/v1/admin/pevs/{id}",missing)
+            .header("Authorization","Bearer "+citizenAccess)).andExpect(status().isForbidden());
+        var adminAccount=administrator(); String adminAccess=login(adminAccount.email());
+        mvc.perform(get("/api/v1/admin/pevs/{id}",missing)
+            .header("Authorization","Bearer "+adminAccess))
+            .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",adminAccount.id());
+        mvc.perform(get("/api/v1/admin/pevs/{id}",missing)
+            .header("Authorization","Bearer "+adminAccess)).andExpect(status().isUnauthorized());
     }
 
     private UUID citizenPev() throws Exception {
@@ -157,7 +205,7 @@ class PevAdministrationIntegrationTest {
     }
 
     private void setState(UUID id,String status,int day,UUID adminId) {
-        String date="2020-01-0"+day+" 00:00:00+00";
+        String date="2010-01-0"+day+" 00:00:00+00";
         if(status.equals("APPROVED"))
             admin().update("UPDATE pev SET created_at=CAST(? AS timestamptz),status='APPROVED',approved_at=clock_timestamp(),approved_by=? WHERE id=?",date,adminId,id);
         else

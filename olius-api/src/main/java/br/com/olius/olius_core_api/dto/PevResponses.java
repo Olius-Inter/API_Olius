@@ -20,4 +20,7 @@ public final class PevResponses {
                            Instant approvedAt, UUID ownerId, UserType ownerType, String ownerName,
                            AddressView address) { }
     public record AdminPage(List<AdminPev> items, int page, int size, long totalElements) { }
+    public record AdminPevDetail(UUID id, PevStatus status, Instant createdAt, Instant updatedAt,
+                                 Instant approvedAt, UUID approvedBy, UUID ownerId,
+                                 UserType ownerType, String ownerName, AddressView address) { }
 }
