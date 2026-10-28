@@ -1,8 +1,6 @@
 package br.com.olius.olius_core_api;
 
 import br.com.olius.olius_core_api.config.SecurityProperties;
-import br.com.olius.olius_core_api.dto.IdentityRequests.AdminRegistration;
-import br.com.olius.olius_core_api.service.FirstAdminService;
 import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
 
 import java.time.Instant;
@@ -42,7 +40,6 @@ class IdentitySecurityIntegrationTest {
     @Autowired JwtEncoder encoder;
     @Autowired JwtDecoder decoder;
     @Autowired SecurityProperties properties;
-    @Autowired FirstAdminService firstAdmin;
     private static final String PASSWORD="Password1!";
 
     @Test void citizenRegistrationLoginAndOwnerProfile() throws Exception {
@@ -222,14 +219,12 @@ class IdentitySecurityIntegrationTest {
             .content(json.writeValueAsString(Map.of("refreshToken",current.getValue())))).andExpect(status().isUnauthorized());
     }
 
-    @Test void administrativeProvisioningRequiresActiveAdminAndLogoutClosesOnlyCurrentSession() throws Exception {
+    @Test void directAdministrativeCreationIsRemovedAndLogoutClosesOnlyCurrentSession() throws Exception {
         var administrator=administrator(); String adminToken=login(administrator.email()).access();
-        String createdEmail=email();
         mvc.perform(post("/api/v1/admin/users").header("Authorization","Bearer "+adminToken)
-            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
-                "name","Novo administrador","email",createdEmail,"password",PASSWORD))))
-            .andExpect(status().isCreated()).andExpect(jsonPath("$.userType").value("ADMIN"));
-        String createdToken=login(createdEmail).access();
+            .contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isNotFound());
+        String createdToken=adminToken;
         mvc.perform(get("/api/v1/auth/session").header("Authorization","Bearer "+createdToken))
             .andExpect(status().isOk()).andExpect(jsonPath("$.userType").value("ADMIN"));
         var account=citizen(); var first=login(account.email()); var second=login(account.email());
@@ -237,6 +232,15 @@ class IdentitySecurityIntegrationTest {
             .andExpect(status().isNoContent());
         mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+first.access())).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+second.access())).andExpect(status().isOk());
+    }
+
+    @Test void issuingWithoutDeliveryAdapterFailsBeforePersistingInvitation() throws Exception {
+        var actor=administrator(); String access=login(actor.email()).access(); String recipient=email();
+        mvc.perform(post("/api/v1/admin/invitations").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json.writeValueAsString(Map.of("name","Convidado","email",recipient))))
+            .andExpect(status().isServiceUnavailable());
+        assertThat(admin().queryForObject("SELECT count(*) FROM admin_invitation WHERE email=?",Integer.class,recipient)).isZero();
     }
 
     @Test void webLogoutAcceptsExpiredBearerAndIsIdempotent() throws Exception {
@@ -278,13 +282,18 @@ class IdentitySecurityIntegrationTest {
             .andExpect(jsonPath("$.paths['/api/v1/auth/mobile/login'].post.requestBody").exists());
     }
 
-    @Test @org.junit.jupiter.api.Order(1) void bootstrapProvisionsFirstAndRefusesAnother() throws Exception {
+    @Test @org.junit.jupiter.api.Order(1) void bootstrapRequiresInvitationAndAcceptDoesNotLogin() throws Exception {
         String initialEmail=email();
-        UUID initial=firstAdmin.provision(new AdminRegistration("Inicial",initialEmail,PASSWORD));
-        assertThat(initial).isNotNull(); assertThat(login(initialEmail).access()).isNotBlank();
-        var anotherAdmin = new AdminRegistration("Admin",email(),PASSWORD);
-        assertThatThrownBy(() -> firstAdmin.provision(anotherAdmin))
-            .isInstanceOf(IllegalStateException.class);
+        var secrets=new br.com.olius.olius_core_api.security.SecretTokens();
+        String token=secrets.generate();
+        admin().queryForObject("SELECT public.issue_bootstrap_admin_invitation(?,?,?)",UUID.class,
+            "Inicial",initialEmail,secrets.hash(token));
+        mvc.perform(post("/api/v1/auth/admin-invitations/acceptance").contentType(MediaType.APPLICATION_JSON)
+            .content(json.writeValueAsString(Map.of("token",token,"password",PASSWORD))))
+            .andExpect(status().isNoContent()).andExpect(header().doesNotExist("Set-Cookie"));
+        assertThat(login(initialEmail).access()).isNotBlank();
+        assertThatThrownBy(() -> admin().queryForObject("SELECT public.issue_bootstrap_admin_invitation(?,?,?)",
+            UUID.class,"Outro",email(),secrets.hash(secrets.generate()))).isInstanceOf(org.springframework.dao.DataAccessException.class);
     }
 
     private Account citizen() throws Exception {

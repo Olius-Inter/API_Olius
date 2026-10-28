@@ -15,6 +15,16 @@ class AuthRateLimitFilterTest {
         filter.doFilter(new MockHttpServletRequest("POST","/api/v1/auth/registrations/establishments"),second,(req,res) -> { throw new AssertionError("Quota exceeded"); });
         assertThat(second.getStatus()).isEqualTo(429);
     }
+    @Test void invitationAcceptanceIsRateLimitedWithoutAuthentication() throws Exception {
+        var filter=new AuthRateLimitFilter(new AuthRateLimiter(1,10,Clock.systemUTC()),new ApiProblemFactory(),new ObjectMapper());
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/auth/admin-invitations/acceptance"),new MockHttpServletResponse(),(req,res) -> { });
+        var response=new MockHttpServletResponse();
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/auth/admin-invitations/acceptance"),response,(req,res) -> {
+            throw new AssertionError("Limite deve proteger o aceite");
+        });
+        assertThat(response.getStatus()).isEqualTo(429);
+    }
+
     @Test void fetchingCsrfDoesNotConsumeAuthenticationQuota() throws Exception {
         var filter=new AuthRateLimitFilter(new AuthRateLimiter(1,10,Clock.systemUTC()),new ApiProblemFactory(),new ObjectMapper());
         for(int i=0;i<3;i++) {
