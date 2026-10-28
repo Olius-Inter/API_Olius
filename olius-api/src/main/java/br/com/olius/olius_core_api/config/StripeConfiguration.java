@@ -26,6 +26,18 @@ public class StripeConfiguration {
                 properties.getWebhookSecret(),java.time.Clock.systemUTC());
     }
 
+    @Bean
+    @ConditionalOnProperty(name="olius.payments.stripe.enabled", havingValue="true")
+    br.com.olius.olius_core_api.integration.payment.RefundGateway stripeRefundGateway(StripeProperties properties) {
+        return new br.com.olius.olius_core_api.integration.payment.StripeRefundGateway(properties.getSecretKey());
+    }
+
+    @Bean
+    @ConditionalOnProperty(name="olius.payments.stripe.enabled", havingValue="true")
+    br.com.olius.olius_core_api.integration.payment.ChargeReconciliationGateway stripeChargeReconciliationGateway(StripeProperties properties) {
+        return new br.com.olius.olius_core_api.integration.payment.StripeChargeReconciliationGateway(properties.getSecretKey());
+    }
+
     private URI returnUrl(String value) {
         if (value == null || value.isBlank())
             throw new IllegalStateException("Configure as URLs de retorno do Checkout");

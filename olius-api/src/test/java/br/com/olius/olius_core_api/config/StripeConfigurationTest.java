@@ -7,12 +7,15 @@ import static org.assertj.core.api.Assertions.*;
 
 class StripeConfigurationTest {
     private final ApplicationContextRunner context=new ApplicationContextRunner()
-            .withUserConfiguration(StripeConfiguration.class);
+            .withUserConfiguration(StripeConfiguration.class,StripeSchedulingConfiguration.class);
 
     @Test void disabledConnectorDoesNotRequireCredentialsOrUrls() {
         context.run(application -> {
             assertThat(application).hasNotFailed();
             assertThat(application).doesNotHaveBean(CheckoutGateway.class);
+            assertThat(application).doesNotHaveBean(br.com.olius.olius_core_api.integration.payment.ChargeReconciliationGateway.class);
+            assertThat(application).doesNotHaveBean(org.springframework.scheduling.TaskScheduler.class);
+            assertThat(application).doesNotHaveBean(br.com.olius.olius_core_api.integration.payment.RefundGateway.class);
         });
     }
     @Test void completeSandboxConfigurationCreatesCheckoutVerificationAndSignatureBeans() {
@@ -24,6 +27,9 @@ class StripeConfigurationTest {
                 .run(application -> {
                     assertThat(application).hasNotFailed();
                     assertThat(application).hasSingleBean(CheckoutGateway.class);
+                    assertThat(application).hasSingleBean(br.com.olius.olius_core_api.integration.payment.ChargeReconciliationGateway.class);
+                    assertThat(application).hasSingleBean(org.springframework.scheduling.TaskScheduler.class);
+                    assertThat(application).hasSingleBean(br.com.olius.olius_core_api.integration.payment.RefundGateway.class);
                     assertThat(application).hasSingleBean(br.com.olius.olius_core_api.integration.payment.PaymentVerificationGateway.class);
                     assertThat(application).hasSingleBean(br.com.olius.olius_core_api.security.StripeWebhookSignatureVerifier.class);
                 });

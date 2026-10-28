@@ -30,7 +30,7 @@ public final class StripeCheckoutGateway implements CheckoutGateway, PaymentVeri
         this.cancelUrl=cancelUrl;
     }
 
-    private static RestClient client(String secretKey) {
+    static RestClient client(String secretKey) {
         var factory=new NoRedirectRequestFactory();
         factory.setConnectTimeout(5000);
         factory.setReadTimeout(15000);
