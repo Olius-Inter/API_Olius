@@ -212,3 +212,12 @@ CREATE INDEX idx_auth_session_user_created ON auth_session (user_id, created_at 
 CREATE INDEX idx_auth_session_unrevoked_expiry ON auth_session (idle_expires_at)
     WHERE revoked_at IS NULL;
 CREATE INDEX idx_auth_session_log_history ON auth_session_log (id, performed_at DESC);
+
+-- BEGIN ADMIN_MANAGEMENT
+-- Expirados ainda ocupam a chave até reenvio/revogação; tempo não cabe no predicado.
+CREATE UNIQUE INDEX uq_admin_invitation_open_email ON public.admin_invitation(email)
+    WHERE accepted_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX idx_admin_invitation_author ON public.admin_invitation(invited_by) WHERE invited_by IS NOT NULL;
+CREATE INDEX idx_admin_invitation_accepted_user ON public.admin_invitation(accepted_user_id) WHERE accepted_user_id IS NOT NULL;
+CREATE INDEX idx_admin_invitation_revoker ON public.admin_invitation(revoked_by) WHERE revoked_by IS NOT NULL;
+-- END ADMIN_MANAGEMENT

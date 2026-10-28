@@ -1009,3 +1009,16 @@ ALTER TABLE auth_session_log
         ((actor_kind = 'USER' AND performed_by IS NOT NULL)
          OR (actor_kind = 'SYSTEM' AND performed_by IS NULL))),
     ADD CONSTRAINT ck_auth_session_log_performed_at CHECK (isfinite(performed_at));
+
+-- BEGIN ADMIN_MANAGEMENT
+ALTER TABLE public.admin_guard_state ADD CONSTRAINT ck_admin_guard_singleton CHECK(singleton AND revision>=0);
+ALTER TABLE public.admin_invitation
+    ADD CONSTRAINT ck_admin_invitation_identity CHECK(btrim(name)<>'' AND email=lower(btrim(email)) AND position('@' IN email)>1),
+    ADD CONSTRAINT ck_admin_invitation_hash CHECK(octet_length(token_hash)=32),
+    ADD CONSTRAINT ck_admin_invitation_validity CHECK(expires_at=issued_at+INTERVAL '24 hours'),
+    ADD CONSTRAINT ck_admin_invitation_author CHECK(is_bootstrap=(invited_by IS NULL)),
+    ADD CONSTRAINT ck_admin_invitation_acceptance CHECK((accepted_at IS NULL)=(accepted_user_id IS NULL)),
+    ADD CONSTRAINT ck_admin_invitation_terminal CHECK(NOT(accepted_at IS NOT NULL AND revoked_at IS NOT NULL)),
+    ADD CONSTRAINT ck_admin_invitation_dates CHECK((accepted_at IS NULL OR (accepted_at>=issued_at AND accepted_at<expires_at)) AND (revoked_at IS NULL OR revoked_at>=issued_at)),
+    ADD CONSTRAINT ck_admin_invitation_revoker CHECK(revoked_at IS NOT NULL OR revoked_by IS NULL);
+-- END ADMIN_MANAGEMENT

@@ -108,7 +108,8 @@ class PevStatusIntegrationTest {
         assertThat(admin().queryForObject("SELECT status::text FROM pev WHERE id=?",String.class,pev))
             .isEqualTo("PENDING");
         assertThat(auditUpdates(pev,adminAccount.id())).isZero();
-        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",adminAccount.id());
+        admin().queryForObject("SELECT public.set_admin_status(?,?,'INACTIVE'::public.active_status_t)",
+                Object.class,administrator().id(),adminAccount.id());
         mvc.perform(change(pev,"APPROVED",adminAccess)).andExpect(status().isUnauthorized());
     }
 

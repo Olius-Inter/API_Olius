@@ -77,9 +77,11 @@ class AuthDatabaseContractTest {
             }
             assertThat(valid(connection, user, first)).isFalse();
             assertThat(valid(connection, user, second)).isTrue();
-            try (var query = connection.prepareStatement("UPDATE users SET status='INACTIVE' WHERE id=?")) {
-                query.setObject(1, user);
-                assertThat(query.executeUpdate()).isEqualTo(1);
+            UUID actor = user(connection, "ADMIN");
+            try (var query = connection.prepareStatement("SELECT public.set_admin_status(?,?,'INACTIVE')")) {
+                query.setObject(1, actor);
+                query.setObject(2, user);
+                try (var result = query.executeQuery()) { assertThat(result.next()).isTrue(); }
             }
             assertThat(valid(connection, user, second)).isFalse();
         }
@@ -107,6 +109,17 @@ class AuthDatabaseContractTest {
     }
 
     private UUID user(Connection connection, String profile) throws SQLException {
+        // Conta administrativa já existente é preparada somente pelo proprietário da fixture.
+        // A conexão operacional continua proibida de INSERT ADMIN (coberto na suíte de convites).
+        if ("ADMIN".equals(profile)) {
+            try (var owner = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+                return insertUser(owner, profile);
+            }
+        }
+        return insertUser(connection, profile);
+    }
+
+    private UUID insertUser(Connection connection, String profile) throws SQLException {
         // Fixture de usuário: não substitui o cadastro completo da especialização.
         try (var query = connection.prepareStatement("INSERT INTO users(name,email,password_hash,user_type) VALUES ('Teste',?,'fixture-only',?::user_type_t) RETURNING id")) {
             query.setString(1, UUID.randomUUID() + "@test.invalid");

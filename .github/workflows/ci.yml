@@ -14,7 +14,15 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build, Tests and Sonar
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: '16.15'
+            name: Build, Tests and Sonar
+          - postgres: '18.6'
+            name: Compatibility PostgreSQL 18.6
     runs-on: ubuntu-latest
 
     defaults:
@@ -38,10 +46,14 @@ jobs:
       - name: Dar permissão ao Maven Wrapper
         run: chmod +x ./mvnw
 
-      - name: Build, Test and Sonar
+      - name: Build and Test PostgreSQL
+        run: ./mvnw clean verify -Dolius.test.postgres-image=postgres:${{ matrix.postgres }}
+
+      - name: Sonar
+        if: matrix.postgres == '16.15'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          ./mvnw clean verify \
+          ./mvnw \
             org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
             -Dsonar.projectKey=Olius-Inter_API_Olius

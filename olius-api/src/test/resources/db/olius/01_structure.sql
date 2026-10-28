@@ -665,7 +665,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON TABLE certificate_level IS 'Metas e nomes definitivos pendentes; não inserir níveis fictícios.';
+COMMENT ON TABLE certificate_level IS 'Níveis oficiais por volume acumulado efetivamente coletado: Bronze 100 L, Prata 500 L e Ouro 1.000 L; sem reinício anual.';
 
 CREATE TABLE certificate (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1367,3 +1367,83 @@ COMMENT ON TABLE auth_session_log IS 'Snapshots de sessão sem tokens/hashes. us
 
 -- Acesso público bloqueado; perfis são configurados na entrega data_catalog.
 REVOKE ALL ON auth_session, auth_refresh_token, auth_session_log FROM PUBLIC;
+
+-- BEGIN ADMIN_MANAGEMENT
+-- Mutex transacional. Não representa um perfil nem armazena dados de negócio.
+CREATE TABLE public.admin_guard_state (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    revision BIGINT NOT NULL DEFAULT 0
+);
+INSERT INTO public.admin_guard_state(singleton) VALUES(TRUE);
+COMMENT ON TABLE public.admin_guard_state IS 'Linha técnica que serializa convites e mudanças administrativas; atualização força conflito seguro em REPEATABLE READ.';
+
+CREATE TABLE public.admin_invitation (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(150) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    token_hash BYTEA NOT NULL UNIQUE,
+    issued_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    invited_by UUID REFERENCES public.users(id) ON DELETE RESTRICT,
+    is_bootstrap BOOLEAN NOT NULL DEFAULT FALSE,
+    accepted_at TIMESTAMPTZ,
+    accepted_user_id UUID REFERENCES public.users(id) ON DELETE RESTRICT,
+    revoked_at TIMESTAMPTZ,
+    revoked_by UUID REFERENCES public.users(id) ON DELETE RESTRICT
+);
+COMMENT ON TABLE public.admin_invitation IS 'Convite de ADMIN válido por 24 horas, de uso único. users só é criado no aceite; reenvio revoga o convite anterior.';
+COMMENT ON COLUMN public.admin_invitation.token_hash IS 'SHA-256 de 32 bytes; a Core gera o segredo aleatório e envia por e-mail, nunca persistindo o token original.';
+COMMENT ON COLUMN public.admin_invitation.is_bootstrap IS 'Exceção de implantação sem autor: permitida somente enquanto nenhum ADMIN estiver cadastrado.';
+CREATE TABLE public.admin_invitation_log (
+    LIKE public.admin_invitation,
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    audit_event_id UUID NOT NULL,
+    snapshot_kind public.audit_snapshot_t NOT NULL,
+    operation public.operation_status_t NOT NULL,
+    performed_at TIMESTAMPTZ NOT NULL,
+    performed_by UUID REFERENCES public.users(id) ON DELETE RESTRICT,
+    actor_kind public.audit_actor_t NOT NULL,
+    operational_driver_id UUID REFERENCES public.driver(id) ON DELETE RESTRICT,
+    audit_reason TEXT,
+    changed_columns TEXT[] NOT NULL,
+    CONSTRAINT uq_admin_invitation_log_snapshot UNIQUE(audit_event_id,id,snapshot_kind)
+);
+ALTER TABLE public.admin_invitation_log DROP COLUMN token_hash;
+COMMENT ON TABLE public.admin_invitation_log IS 'Snapshots de convites sem token original nem hash. Aceite e criação de usuário são auditados na mesma transação.';
+REVOKE ALL ON public.admin_guard_state, public.admin_invitation, public.admin_invitation_log FROM PUBLIC;
+COMMENT ON COLUMN public.admin_guard_state.singleton IS 'Chave fixa TRUE da única linha de coordenação administrativa.';
+COMMENT ON COLUMN public.admin_guard_state.revision IS 'Versão técnica incrementada para serializar alterações e detectar snapshots concorrentes.';
+COMMENT ON COLUMN public.admin_invitation.id IS 'Identificador UUID do convite.';
+COMMENT ON COLUMN public.admin_invitation.name IS 'Nome do futuro administrador, preservado para o aceite.';
+COMMENT ON COLUMN public.admin_invitation.email IS 'E-mail do destinatário normalizado em minúsculas, sem espaços externos.';
+COMMENT ON COLUMN public.admin_invitation.token_hash IS 'SHA-256 de 32 bytes do segredo aleatório; não é o token enviado por e-mail.';
+COMMENT ON COLUMN public.admin_invitation.issued_at IS 'Instante da emissão, definido pelo banco.';
+COMMENT ON COLUMN public.admin_invitation.expires_at IS 'Prazo fixo de 24 horas após a emissão.';
+COMMENT ON COLUMN public.admin_invitation.invited_by IS 'ADMIN emissor; NULL somente no bootstrap restrito de implantação.';
+COMMENT ON COLUMN public.admin_invitation.is_bootstrap IS 'Indica emissão de implantação enquanto nenhum ADMIN está cadastrado.';
+COMMENT ON COLUMN public.admin_invitation.accepted_at IS 'Instante de consumo único, anterior à expiração.';
+COMMENT ON COLUMN public.admin_invitation.accepted_user_id IS 'ADMIN criado atomicamente no aceite.';
+COMMENT ON COLUMN public.admin_invitation.revoked_at IS 'Instante da revogação ou substituição no reenvio.';
+COMMENT ON COLUMN public.admin_invitation.revoked_by IS 'ADMIN que revogou/substituiu; NULL no bootstrap SYSTEM.';
+COMMENT ON COLUMN public.admin_invitation_log.id IS 'Retrato de admin_invitation.id: Identificador UUID do convite.';
+COMMENT ON COLUMN public.admin_invitation_log.name IS 'Retrato de admin_invitation.name: Nome do futuro administrador, preservado para o aceite.';
+COMMENT ON COLUMN public.admin_invitation_log.email IS 'Retrato de admin_invitation.email: E-mail do destinatário normalizado em minúsculas, sem espaços externos.';
+COMMENT ON COLUMN public.admin_invitation_log.issued_at IS 'Retrato de admin_invitation.issued_at: Instante da emissão, definido pelo banco.';
+COMMENT ON COLUMN public.admin_invitation_log.expires_at IS 'Retrato de admin_invitation.expires_at: Prazo fixo de 24 horas após a emissão.';
+COMMENT ON COLUMN public.admin_invitation_log.invited_by IS 'Retrato de admin_invitation.invited_by: ADMIN emissor; NULL somente no bootstrap restrito de implantação.';
+COMMENT ON COLUMN public.admin_invitation_log.is_bootstrap IS 'Retrato de admin_invitation.is_bootstrap: Indica emissão de implantação enquanto nenhum ADMIN está cadastrado.';
+COMMENT ON COLUMN public.admin_invitation_log.accepted_at IS 'Retrato de admin_invitation.accepted_at: Instante de consumo único, anterior à expiração.';
+COMMENT ON COLUMN public.admin_invitation_log.accepted_user_id IS 'Retrato de admin_invitation.accepted_user_id: ADMIN criado atomicamente no aceite.';
+COMMENT ON COLUMN public.admin_invitation_log.revoked_at IS 'Retrato de admin_invitation.revoked_at: Instante da revogação ou substituição no reenvio.';
+COMMENT ON COLUMN public.admin_invitation_log.revoked_by IS 'Retrato de admin_invitation.revoked_by: ADMIN que revogou/substituiu; NULL no bootstrap SYSTEM.';
+COMMENT ON COLUMN public.admin_invitation_log.log_id IS 'Identificador UUID do snapshot de auditoria.';
+COMMENT ON COLUMN public.admin_invitation_log.audit_event_id IS 'Correlaciona os retratos BEFORE e AFTER da mesma alteração.';
+COMMENT ON COLUMN public.admin_invitation_log.snapshot_kind IS 'Lado BEFORE ou AFTER preservado.';
+COMMENT ON COLUMN public.admin_invitation_log.operation IS 'Operação INSERT, UPDATE ou DELETE auditada.';
+COMMENT ON COLUMN public.admin_invitation_log.performed_at IS 'Instante efetivo de gravação do snapshot.';
+COMMENT ON COLUMN public.admin_invitation_log.performed_by IS 'Usuário autor quando actor_kind é USER.';
+COMMENT ON COLUMN public.admin_invitation_log.actor_kind IS 'Contexto USER ou SYSTEM da operação.';
+COMMENT ON COLUMN public.admin_invitation_log.operational_driver_id IS 'Motorista do contexto genérico; não utilizado nas rotinas administrativas.';
+COMMENT ON COLUMN public.admin_invitation_log.audit_reason IS 'Justificativa administrativa, sem tokens ou senhas.';
+COMMENT ON COLUMN public.admin_invitation_log.changed_columns IS 'Nomes dos campos alterados, sem valores sigilosos.';
+-- END ADMIN_MANAGEMENT

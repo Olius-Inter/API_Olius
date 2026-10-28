@@ -62,7 +62,7 @@ public class ApiProblemFactory {
             case UNSUPPORTED_MEDIA_TYPE -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
             case NOT_ACCEPTABLE -> HttpStatus.NOT_ACCEPTABLE;
             case INTERNAL_ERROR -> HttpStatus.INTERNAL_SERVER_ERROR;
-            case SERVICE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+            case SERVICE_UNAVAILABLE, ADMIN_INVITATION_DELIVERY_FAILED -> HttpStatus.SERVICE_UNAVAILABLE;
             case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
         };
     }
@@ -111,6 +111,7 @@ public class ApiProblemFactory {
             case HTTP_REQUEST_ERROR -> "Não foi possível atender à requisição.";
             case SERVICE_UNAVAILABLE -> "O serviço está temporariamente indisponível.";
             case RATE_LIMITED -> "Aguarde antes de tentar novamente.";
+            case ADMIN_INVITATION_DELIVERY_FAILED -> "O convite foi registrado, mas a entrega não foi confirmada. Consulte os convites antes de solicitar novo envio.";
             case INTERNAL_ERROR -> "Não foi possível concluir a operação. Informe o identificador do erro ao suporte.";
         };
     }
