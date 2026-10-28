@@ -32,7 +32,7 @@ class SmtpInvitationTransportTest {
             String raw=received.get(10,TimeUnit.SECONDS);
             var mime=new jakarta.mail.internet.MimeMessage(jakarta.mail.Session.getInstance(new java.util.Properties()),
                     new ByteArrayInputStream(raw.getBytes(StandardCharsets.US_ASCII)));
-            assertThat(mime.getAllRecipients()[0].toString()).isEqualTo("ana@example.invalid");
+            assertThat(mime.getAllRecipients()[0]).hasToString("ana@example.invalid");
             assertThat(mime.getContentType()).startsWith("text/plain");
             assertThat(mime.getContent().toString()).contains("#token="+"b".repeat(43),"24 horas");
         }

@@ -21,6 +21,14 @@ public class AdminInvitationRepository {
              WHEN expires_at<=clock_timestamp() THEN 'EXPIRED'
              ELSE 'AVAILABLE' END AS invitation_state
         """;
+    private static final String LIST_SOURCE =
+            " FROM (SELECT " + COLUMNS + " FROM public.admin_invitation) invitations"
+            + " WHERE (CAST(? AS text) IS NULL OR invitation_state=?)";
+    private static final String COUNT_QUERY = "SELECT count(*)" + LIST_SOURCE;
+    private static final String PAGE_QUERY =
+            "SELECT id,name,email,issued_at,expires_at,invited_by,is_bootstrap,"
+            + "accepted_at,accepted_user_id,revoked_at,revoked_by,invitation_state"
+            + LIST_SOURCE + " ORDER BY issued_at DESC,id DESC LIMIT ? OFFSET ?";
     private final JdbcTemplate jdbc;
 
     public AdminInvitationRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
@@ -51,15 +59,9 @@ public class AdminInvitationRepository {
     }
 
     public Page list(State state, int page, int size) {
-        String where=state==null ? "" : " WHERE invitation_state=?";
-        String source=" FROM (SELECT "+COLUMNS+" FROM public.admin_invitation) invitations";
-        Object[] countArgs=state==null ? new Object[]{} : new Object[]{state.name()};
-        Long total=jdbc.queryForObject("SELECT count(*)"+source+where,Long.class,countArgs);
-        Object[] args=state==null ? new Object[]{size,(long)page*size}
-                : new Object[]{state.name(),size,(long)page*size};
-        var items=jdbc.query("SELECT id,name,email,issued_at,expires_at,invited_by,is_bootstrap,"
-                +"accepted_at,accepted_user_id,revoked_at,revoked_by,invitation_state"+source+where+" ORDER BY issued_at DESC,id DESC LIMIT ? OFFSET ?",
-                this::map,args);
+        String stateName=state==null ? null : state.name();
+        Long total=jdbc.queryForObject(COUNT_QUERY,Long.class,stateName,stateName);
+        var items=jdbc.query(PAGE_QUERY,this::map,stateName,stateName,size,(long)page*size);
         return new Page(items,page,size,total==null ? 0 : total);
     }
 

@@ -33,18 +33,21 @@ class SmtpAdminInvitationDeliveryTest {
         assertThat(invitation(TOKEN).toString()).doesNotContain(TOKEN,"ana@example.invalid");
     }
     @Test void refusesToSendWhileDatabaseTransactionIsActive() {
+        var message=invitation(TOKEN);
         TransactionSynchronizationManager.setActualTransactionActive(true);
-        try { assertThatThrownBy(() -> delivery.send(invitation(TOKEN))).isInstanceOf(IllegalStateException.class); }
+        try { assertThatThrownBy(() -> delivery.send(message)).isInstanceOf(IllegalStateException.class); }
         finally { TransactionSynchronizationManager.setActualTransactionActive(false); }
         verifyNoInteractions(mail);
     }
     @Test void propagatesSmtpFailureWithoutRetrySoOrchestratorCanReportCommittedInvitation() {
         doThrow(new MailAuthenticationException("fixture authentication failure")).when(mail).send(any(SimpleMailMessage.class));
-        assertThatThrownBy(() -> delivery.send(invitation(TOKEN))).isInstanceOf(MailAuthenticationException.class);
+        var message=invitation(TOKEN);
+        assertThatThrownBy(() -> delivery.send(message)).isInstanceOf(MailAuthenticationException.class);
         verify(mail,times(1)).send(any(SimpleMailMessage.class));
     }
     @Test void rejectsUnexpectedTokenFormatBeforeSending() {
-        assertThatThrownBy(() -> delivery.send(invitation("bad#token"))).isInstanceOf(IllegalArgumentException.class);
+        var message=invitation("bad#token");
+        assertThatThrownBy(() -> delivery.send(message)).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(mail);
     }
 }

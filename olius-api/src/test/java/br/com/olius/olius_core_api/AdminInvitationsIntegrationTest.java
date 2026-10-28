@@ -4,7 +4,6 @@ import br.com.olius.olius_core_api.dto.AdminInvitationRequests;
 import br.com.olius.olius_core_api.security.SecretTokens;
 import br.com.olius.olius_core_api.service.AdminInvitationDelivery;
 import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -119,6 +118,27 @@ class AdminInvitationsIntegrationTest {
         accept(next,409);
         mvc.perform(get(ROOT).param("state","REVOKED").header("Authorization","Bearer "+first.access()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.items").isArray());
+    }
+
+    @Test void listsInvitationsWithOptionalStateAndStablePagination() throws Exception {
+        var actor=admin();
+        var issued=issue(actor.access(),email(),201);
+        String id=json.readTree(issued.getResponse().getContentAsString()).get("id").asText();
+        mvc.perform(post(ROOT+"/"+id+"/revocation").header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isNoContent());
+        long total=owner().queryForObject("SELECT count(*) FROM admin_invitation",Long.class);
+        long revoked=owner().queryForObject("SELECT count(*) FROM admin_invitation WHERE revoked_at IS NOT NULL",Long.class);
+        mvc.perform(get(ROOT).param("size","1").header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(total))
+            .andExpect(jsonPath("$.items.length()").value(1));
+        mvc.perform(get(ROOT).param("state","REVOKED").param("size","1")
+                .header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(revoked))
+            .andExpect(jsonPath("$.items[0].state").value("REVOKED"));
+        mvc.perform(get(ROOT).param("state","REVOKED").param("size","1").param("page",Long.toString(revoked))
+                .header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(revoked))
+            .andExpect(jsonPath("$.items").isEmpty());
     }
 
     @Test void expirationAndInactiveIssuerPreventAcceptanceWithoutLeakingCause() throws Exception {
