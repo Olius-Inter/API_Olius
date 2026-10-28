@@ -856,3 +856,48 @@ COMMIT;
 FIM DO SCRIPT 05
 ===============================================================================
 */
+
+BEGIN;
+-- BEGIN ADMIN_MANAGEMENT
+CREATE OR REPLACE FUNCTION public.fn_olius_admin_guard() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v_sensitive BOOLEAN; v_owner OID;
+BEGIN
+    IF TG_OP='TRUNCATE' THEN
+        IF EXISTS(SELECT 1 FROM public.users WHERE user_type='ADMIN') THEN
+            RAISE EXCEPTION 'TRUNCATE de usuários com administradores é proibido.' USING ERRCODE='55000';
+        END IF;
+        RETURN NULL;
+    END IF;
+    v_sensitive:=CASE TG_OP
+        WHEN 'INSERT' THEN NEW.user_type='ADMIN'
+        WHEN 'DELETE' THEN OLD.user_type='ADMIN'
+        ELSE (OLD.user_type='ADMIN' OR NEW.user_type='ADMIN')
+            AND (OLD.user_type IS DISTINCT FROM NEW.user_type OR OLD.status IS DISTINCT FROM NEW.status) END;
+    IF v_sensitive THEN
+        SELECT relowner INTO v_owner FROM pg_class WHERE oid=TG_RELID;
+        IF current_user<>'olius_auth_owner' AND NOT pg_has_role(current_user,v_owner,'USAGE')
+           AND NOT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
+            RAISE EXCEPTION 'Gestão de ADMIN exige as rotinas autorizadas.' USING ERRCODE='42501';
+        END IF;
+    END IF;
+    IF v_sensitive OR TG_OP='INSERT' OR (TG_OP='UPDATE' AND OLD.email IS DISTINCT FROM NEW.email) THEN
+        PERFORM public.lock_admin_registry();
+    END IF;
+    IF TG_OP IN ('UPDATE','DELETE') AND OLD.user_type='ADMIN' AND OLD.status='ACTIVE'
+       AND (TG_OP='DELETE' OR NEW.user_type<>'ADMIN' OR NEW.status<>'ACTIVE')
+       AND NOT EXISTS(SELECT 1 FROM public.users WHERE user_type='ADMIN' AND status='ACTIVE' AND id<>OLD.id) THEN
+        RAISE EXCEPTION 'Não é permitido remover o último administrador ativo.' USING ERRCODE='55000';
+    END IF;
+    IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.fn_olius_admin_guard() FROM PUBLIC;
+CREATE TRIGGER trg_users_admin_guard BEFORE INSERT OR UPDATE OR DELETE ON public.users
+FOR EACH ROW EXECUTE FUNCTION public.fn_olius_admin_guard();
+CREATE TRIGGER trg_users_admin_no_truncate BEFORE TRUNCATE ON public.users
+FOR EACH STATEMENT EXECUTE FUNCTION public.fn_olius_admin_guard();
+CREATE TRIGGER trg_admin_invitation_audit AFTER INSERT OR UPDATE OR DELETE ON public.admin_invitation
+FOR EACH ROW EXECUTE FUNCTION public.fn_olius_audit_trigger();
+-- END ADMIN_MANAGEMENT
+COMMIT;
