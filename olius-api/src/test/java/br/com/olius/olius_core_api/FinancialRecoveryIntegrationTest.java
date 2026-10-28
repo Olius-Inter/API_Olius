@@ -205,7 +205,11 @@ class FinancialRecoveryIntegrationTest {
         assertThat(state()).isEqualTo("COMPLETED");
     }
     @Test void inactiveAdministratorCannotReadOrInitiateRecovery() {
-        owner.update("UPDATE users SET status='INACTIVE' WHERE id=?",actor);
+        UUID otherAdmin=UUID.randomUUID();
+        owner.update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin de suporte',?,'test-hash','ADMIN')",
+                otherAdmin,otherAdmin+"@example.test");
+        owner.queryForObject("SELECT public.set_admin_status(?,?,'INACTIVE'::public.active_status_t)",
+                Object.class,otherAdmin,actor);
         assertThatThrownBy(()->recovery.refund(actor,refundId)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         assertThatThrownBy(()->recovery.reconcileRefund(actor,refundId,external("found"),REASON)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         verifyNoInteractions(refunds);
