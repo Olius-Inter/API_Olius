@@ -19,7 +19,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro, identidade, PEV e pagamentos B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade, PEV, pagamentos, solicitações e agenda B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -36,7 +36,10 @@ public class OpenApiConfiguration {
             api.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, operation) -> {
                 documentSecurity(path, method, operation);
                 documentResponses(operation);
-                operation.setDescription(description(path, method));
+                if (!path.startsWith("/api/v1/collection-requests")
+                        && !path.startsWith("/api/v1/admin/collection-requests")
+                        && !path.startsWith("/api/v1/billing/cycles/"))
+                    operation.setDescription(description(path, method));
                 documentPevResponse(path, method, operation);
             }));
         };
@@ -90,7 +93,8 @@ public class OpenApiConfiguration {
         responses.addApiResponse("401",error("Credenciais, token ou sessão inválidos"));
         responses.addApiResponse("403",error("Perfil, titularidade ou CSRF não autorizado"));
         responses.addApiResponse("404",error("Recurso não encontrado"));
-        responses.addApiResponse("409",error("Duplicidade ou conflito de cadastro"));
+        responses.addApiResponse("409",error("Duplicidade, idempotência ou estado concorrente/incompatível"));
+        responses.addApiResponse("422",error("Regra de negócio ou dados incompatíveis com a operação"));
         responses.addApiResponse("429",error("Limite técnico de requisições excedido"));
         responses.addApiResponse("500",error("Falha interna, sem detalhes sensíveis"));
         responses.addApiResponse("503",error("Serviço temporariamente indisponível"));

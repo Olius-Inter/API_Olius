@@ -60,7 +60,7 @@ public class SecurityConfiguration {
                         "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh","/api/v1/auth/admin-invitations/acceptance").permitAll()
                     .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types","/api/v1/subscription-plans","/api/v1/pevs",
                         "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
-                    .requestMatchers("/api/v1/billing/**").hasRole("ESTABLISHMENT")
+                    .requestMatchers("/api/v1/billing/**","/api/v1/collection-requests/**").hasRole("ESTABLISHMENT")
                     .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                     .anyRequest().authenticated())
                 .addFilterAt(bearer, BearerTokenAuthenticationFilter.class)
