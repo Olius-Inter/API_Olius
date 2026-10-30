@@ -34,6 +34,11 @@
 		<sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
 	</properties>
 	<dependencies>
+        <!-- Entrega SMTP; versão gerenciada pelo Spring Boot. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
 		<!-- Bancos -->
 		<dependency>
 			<groupId>org.postgresql</groupId>

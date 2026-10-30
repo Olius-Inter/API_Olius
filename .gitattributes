@@ -1,0 +1,2 @@
+olius-api/src/test/resources/db/olius/**/*.sql text eol=lf
+olius-api/src/test/resources/db/olius/snapshot-manifest.json text eol=lf

@@ -7,11 +7,12 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /** Instala a referência oficial antes de disponibilizar a conexão ao Spring. */
 public final class OfficialPostgres extends PostgreSQLContainer {
+    public static final String IMAGE = System.getProperty("olius.test.postgres-image", "postgres:16.15");
     public static final String API_USER = "olius_test_api";
     public static final String API_PASSWORD = "disposable-test-only";
 
     public OfficialPostgres() {
-        super("postgres:16.15");
+        super(IMAGE);
     }
 
     @Override
@@ -21,9 +22,11 @@ public final class OfficialPostgres extends PostgreSQLContainer {
              var statement = connection.createStatement()) {
             for (String script : new String[]{
                     "01_structure.sql", "02_check_constraints.sql", "03_indexes.sql",
-                    "04_functions_procedures_window_functions.sql", "05_triggers.sql",
+                    "04_functions_procedures.sql", "05_triggers.sql",
+                    "06_ctes.sql", "07_window_functions.sql", "08_materialized_views.sql",
                     "data_catalog/01_structure.sql", "data_catalog/02_check_constraints.sql",
-                    "data_catalog/03_view.sql", "data_catalog/04_load.sql", "access_control/01_roles.sql"}) {
+                    "data_catalog/03_view.sql", "data_catalog/04_load.sql", "access_control/01_roles.sql",
+                    "data_catalog/05_validate.sql"}) {
                 // JDBC preserva os blocos dollar-quoted e as transações dos scripts oficiais.
                 statement.execute(new ClassPathResource("db/olius/" + script)
                         .getContentAsString(StandardCharsets.UTF_8));

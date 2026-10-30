@@ -2,6 +2,7 @@ package br.com.olius.olius_core_api.config;
 import br.com.olius.olius_core_api.exception.*;
 import br.com.olius.olius_core_api.security.*;
 import java.util.List;
+import org.springframework.beans.factory.BeanCreationException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.*;
 import org.springframework.http.HttpMethod;
@@ -27,7 +28,7 @@ public class SecurityConfiguration {
     }
     @Bean public SecurityFilterChain security(HttpSecurity http,SecurityProperties properties,
         SessionJwtConverter converter,ProblemAuthenticationEntryPoint entry,ProblemAccessDeniedHandler denied,
-        ApiProblemFactory factory,PersistenceExceptionTranslator translator,ObjectMapper mapper,AuthRateLimiter limiter,JwtDecoder decoder) throws Exception {
+        ApiProblemFactory factory,PersistenceExceptionTranslator translator,ObjectMapper mapper,AuthRateLimiter limiter,JwtDecoder decoder) {
         var csrf=new CookieCsrfTokenRepository();
         csrf.setCookiePath("/api/v1/auth/web");
         csrf.setCookieCustomizer(cookie -> cookie.httpOnly(true).secure(properties.isCookieSecure())
@@ -46,25 +47,31 @@ public class SecurityConfiguration {
         bearer.setAuthenticationFailureHandler(new AuthenticationEntryPointFailureHandler(entry));
         // Register the standard JWT filter explicitly: resource-server DSL adds an
         // automatic CSRF exemption for all Bearer requests, including web logout.
-        http.cors(cors -> cors.configurationSource(cors(properties)))
-            .csrf(config -> browserCsrf(config, csrf))
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .requestCache(cache -> cache.disable()).formLogin(form -> form.disable())
-            .httpBasic(basic -> basic.disable()).logout(logout -> logout.disable())
-            .exceptionHandling(errors -> errors.authenticationEntryPoint(entry).accessDeniedHandler(denied))
-            .authorizeHttpRequests(authorize -> authorize
-                .requestMatchers(HttpMethod.POST,"/api/v1/webhooks/stripe").permitAll()
-                .requestMatchers(HttpMethod.POST,"/api/v1/auth/registrations/citizens","/api/v1/auth/registrations/establishments",
-                    "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh").permitAll()
-                .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types","/api/v1/subscription-plans","/api/v1/pevs",
-                    "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
-                .requestMatchers("/api/v1/billing/**").hasRole("ESTABLISHMENT")
-                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
-                .anyRequest().authenticated())
-            .addFilterAt(bearer, BearerTokenAuthenticationFilter.class)
-            .addFilterBefore(new DatabaseSecurityFailureFilter(factory,translator,mapper),BearerTokenAuthenticationFilter.class)
-            .addFilterBefore(new AuthRateLimitFilter(limiter,factory,mapper),BearerTokenAuthenticationFilter.class);
-        return http.build();
+        try {
+            http.cors(cors -> cors.configurationSource(cors(properties)))
+                .csrf(config -> browserCsrf(config, csrf))
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .requestCache(cache -> cache.disable()).formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable()).logout(logout -> logout.disable())
+                .exceptionHandling(errors -> errors.authenticationEntryPoint(entry).accessDeniedHandler(denied))
+                .authorizeHttpRequests(authorize -> authorize
+                    .requestMatchers(HttpMethod.POST,"/api/v1/webhooks/stripe").permitAll()
+                    .requestMatchers(HttpMethod.POST,"/api/v1/operations/b2b/context",
+                        "/api/v1/operations/b2b/requests/*/arrival","/api/v1/operations/b2b/requests/*/collection").permitAll()
+                    .requestMatchers(HttpMethod.POST,"/api/v1/auth/registrations/citizens","/api/v1/auth/registrations/establishments",
+                        "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh","/api/v1/auth/admin-invitations/acceptance").permitAll()
+                    .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types","/api/v1/subscription-plans","/api/v1/pevs",
+                        "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
+                    .requestMatchers("/api/v1/billing/**","/api/v1/collection-requests/**","/api/v1/collections/**","/api/v1/establishments/me/score").hasRole("ESTABLISHMENT")
+                    .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                    .anyRequest().authenticated())
+                .addFilterAt(bearer, BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(new DatabaseSecurityFailureFilter(factory,translator,mapper),BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(new AuthRateLimitFilter(limiter,factory,mapper),BearerTokenAuthenticationFilter.class);
+            return http.build();
+        } catch (Exception failure) {
+            throw new BeanCreationException("security", "Não foi possível configurar a segurança HTTP", failure);
+        }
     }
     /**
      * Cookie-authenticated web operations always require CSRF. Other operations do

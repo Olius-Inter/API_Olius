@@ -123,7 +123,8 @@ class PevAdministrationIntegrationTest {
             .param("page","2147483647").param("size","20")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess)
             .param("ownerType","ADMIN")).andExpect(status().isBadRequest());
-        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",adminId);
+        admin().queryForObject("SELECT public.set_admin_status(?,?,'INACTIVE'::public.active_status_t)",
+                Object.class,administrator().id(),adminId);
         mvc.perform(get("/api/v1/admin/pevs").header("Authorization","Bearer "+adminAccess))
             .andExpect(status().isUnauthorized());
     }
@@ -170,7 +171,8 @@ class PevAdministrationIntegrationTest {
         mvc.perform(get("/api/v1/admin/pevs/{id}",missing)
             .header("Authorization","Bearer "+adminAccess))
             .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
-        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",adminAccount.id());
+        admin().queryForObject("SELECT public.set_admin_status(?,?,'INACTIVE'::public.active_status_t)",
+                Object.class,administrator().id(),adminAccount.id());
         mvc.perform(get("/api/v1/admin/pevs/{id}",missing)
             .header("Authorization","Bearer "+adminAccess)).andExpect(status().isUnauthorized());
     }

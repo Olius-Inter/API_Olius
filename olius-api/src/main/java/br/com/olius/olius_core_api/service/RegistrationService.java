@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -46,13 +45,6 @@ public class RegistrationService {
         em.persist(new Establishment(id,request.cnpj(),qr,request.description(),request.typeId(),addressId));
         phones(id,request.telephones()); em.flush();
         return new Registration(id,UserType.ESTABLISHMENT);
-    }
-    @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
-    public Registration admin(AdminRegistration request, UUID actor) {
-        audit.user(actor,"Provisionamento administrativo autenticado");
-        UUID id=UUID.randomUUID(); persistUser(id,request.name(),request.email(),request.password(),UserType.ADMIN);
-        return new Registration(id,UserType.ADMIN);
     }
     private UUID createUser(String name, String email, String password, UserType type) {
         UUID id=UUID.randomUUID(); audit.user(id,"Cadastro público do titular");

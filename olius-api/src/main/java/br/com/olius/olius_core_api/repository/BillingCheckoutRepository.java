@@ -13,8 +13,13 @@ import org.springframework.stereotype.Repository;
 /** SQL explícito para respeitar permissões por coluna e defaults protegidos. */
 @Repository
 public class BillingCheckoutRepository {
+    private static final String FIELD_ENDS_AT="ends_at";
     public record Quote(UUID id,String name,String description,BigDecimal price,BigDecimal liters,int slots) { }
     public record Cycle(UUID id,UUID subscriptionId,Instant startsAt,Instant endsAt) { }
+    public record UpgradeCycle(UUID id,UUID subscriptionId,Instant endsAt,Quote plan) { }
+    public record UpgradeTerms(UUID cycleId,Instant cycleEndsAt,UUID fromPlanId,BigDecimal fromMonthlyPrice,
+        BigDecimal targetMonthlyPrice,BigDecimal targetLiters,int targetSlots,BigDecimal currentAvailableLiters,
+        long currentAvailableSlots,BigDecimal availableLitersAfterUpgrade,long availableSlotsAfterUpgrade,Instant calculatedAt) { }
     public record Charge(UUID id,UUID ownerId,UUID planId,UUID key,String planName,BigDecimal amount,
                          Instant expiresAt,String status,String providerId,String provider,String purpose) { }
     private static final String CHARGE_COLUMNS="id,establishment_id,plan_id,idempotency_key,plan_name,amount,expires_at,status,provider_charge_id,provider,purpose";
@@ -93,7 +98,7 @@ public class BillingCheckoutRepository {
                 SELECT id,subscription_id,starts_at,ends_at FROM public.subscription_cycle
                 WHERE establishment_id=? ORDER BY ends_at DESC,starts_at DESC,id DESC LIMIT 1
                 """,(rs,n)->new Cycle(rs.getObject("id",UUID.class),rs.getObject("subscription_id",UUID.class),
-                rs.getTimestamp("starts_at").toInstant(),rs.getTimestamp("ends_at").toInstant()),owner);
+                rs.getTimestamp("starts_at").toInstant(),rs.getTimestamp(FIELD_ENDS_AT).toInstant()),owner);
     }
     public boolean hasAnotherActiveSubscription(UUID owner,UUID subscription) {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
@@ -111,6 +116,62 @@ public class BillingCheckoutRepository {
                 VALUES (?,?,?,'RENEWAL',?,?)
                 """,id,owner,previous.subscriptionId(),"RENEWAL:"+previous.id(),previous.id());
         return id;
+    }
+    public List<UpgradeCycle> currentUpgradeCycle(UUID owner) {
+        return jdbc.query("""
+                SELECT c.* FROM public.subscription_cycle c JOIN public.establishment_subscription s ON s.id=c.subscription_id
+                WHERE c.establishment_id=? AND s.status='ACTIVE'
+                AND c.starts_at<=clock_timestamp() AND c.ends_at>clock_timestamp()
+                """,(rs,n)->new UpgradeCycle(rs.getObject("id",UUID.class),rs.getObject("subscription_id",UUID.class),
+                rs.getTimestamp(FIELD_ENDS_AT).toInstant(),new Quote(rs.getObject("plan_id",UUID.class),
+                rs.getString("plan_name"),rs.getString("plan_description"),rs.getBigDecimal("monthly_price"),
+                rs.getBigDecimal("volume_limit_liters"),rs.getInt("collection_limit"))),owner);
+    }
+    public boolean hasOpenUpgrade(UUID cycle) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM public.billing_charge WHERE target_cycle_id=? AND purpose='UPGRADE'
+                AND status IN ('OPEN','CANCELLATION_PENDING'))
+                """,Boolean.class,cycle));
+    }
+    public UUID upgradeOrder(UUID owner,UpgradeCycle current,UUID destination) {
+        String benefit="UPGRADE:"+current.id()+":"+current.plan().id()+":"+destination;
+        var existing=jdbc.query("SELECT id FROM public.billing_order WHERE establishment_id=? AND benefit_key=?",
+                (rs,n)->rs.getObject(1,UUID.class),owner,benefit);
+        if(!existing.isEmpty()) return existing.getFirst();
+        UUID id=UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO public.billing_order(id,establishment_id,subscription_id,purpose,benefit_key,target_cycle_id)
+                VALUES (?,?,?,'UPGRADE',?,?)
+                """,id,owner,current.subscriptionId(),benefit,current.id());
+        return id;
+    }
+    public Charge insertUpgrade(UUID owner,UUID order,UUID key,UpgradeCycle current,Quote target,Instant expires) {
+        UUID id=UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO public.billing_charge(id,billing_order_id,establishment_id,purpose,target_cycle_id,provider,
+                idempotency_key,plan_id,plan_name,plan_description,quoted_monthly_price,quoted_volume_limit_liters,
+                quoted_collection_limit,from_plan_id,from_monthly_price,amount,currency,expires_at)
+                VALUES (?,?,?,'UPGRADE',?,'STRIPE',?,?,?,?,?,?,?,?,?,?,'BRL',?)
+                """,id,order,owner,current.id(),key,target.id(),target.name(),target.description(),target.price(),
+                target.liters(),target.slots(),current.plan().id(),current.plan().price(),
+                target.price().subtract(current.plan().price()),Timestamp.from(expires));
+        return byKey(key).getFirst();
+    }
+    public UpgradeTerms upgradeTerms(UUID owner,UUID charge) {
+        return jdbc.queryForObject("""
+                SELECT b.target_cycle_id,c.ends_at,b.from_plan_id,b.from_monthly_price,b.quoted_monthly_price,
+                b.quoted_volume_limit_liters,b.quoted_collection_limit,a.available_volume_liters,a.available_collection_slots,
+                GREATEST(b.quoted_volume_limit_liters-a.reserved_volume_liters-a.consumed_volume_liters-a.forfeited_volume_liters,0) AS upgraded_liters,
+                GREATEST(b.quoted_collection_limit::bigint-a.reserved_collection_slots-a.consumed_collection_slots-a.forfeited_collection_slots,0) AS upgraded_slots,
+                clock_timestamp() AS calculated_at
+                FROM public.billing_charge b JOIN public.subscription_cycle c ON c.id=b.target_cycle_id
+                CROSS JOIN LATERAL public.get_cycle_availability(c.id) a
+                WHERE b.id=? AND b.establishment_id=? AND b.purpose='UPGRADE'
+                """,(rs,n)->new UpgradeTerms(rs.getObject("target_cycle_id",UUID.class),rs.getTimestamp(FIELD_ENDS_AT).toInstant(),
+                rs.getObject("from_plan_id",UUID.class),rs.getBigDecimal("from_monthly_price"),rs.getBigDecimal("quoted_monthly_price"),
+                rs.getBigDecimal("quoted_volume_limit_liters"),rs.getInt("quoted_collection_limit"),rs.getBigDecimal("available_volume_liters"),
+                rs.getLong("available_collection_slots"),rs.getBigDecimal("upgraded_liters"),rs.getLong("upgraded_slots"),
+                rs.getTimestamp("calculated_at").toInstant()),charge,owner);
     }
     public void associate(UUID id,String providerId) {
         jdbc.update("UPDATE public.billing_charge SET provider_charge_id=? WHERE id=?",providerId,id);

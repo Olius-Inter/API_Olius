@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api;
 
+import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -14,7 +15,7 @@ import static org.assertj.core.api.Assertions.*;
 @Testcontainers
 class AuthNonSuperuserInstallationTest {
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16.15");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(OfficialPostgres.IMAGE);
 
     @Test
     void installsMainScriptsWithoutSuperuserOrParameterGrants() throws Exception {
@@ -42,7 +43,7 @@ class AuthNonSuperuserInstallationTest {
                     """)).isInstanceOfSatisfying(SQLException.class,
                         error -> assertThat(error.getSQLState()).isEqualTo("42501"));
             for (String script : new String[]{"01_structure.sql", "02_check_constraints.sql",
-                    "03_indexes.sql", "04_functions_procedures_window_functions.sql", "05_triggers.sql"}) {
+                    "03_indexes.sql", "04_functions_procedures.sql", "05_triggers.sql"}) {
                 statement.execute(new ClassPathResource("db/olius/"+script)
                         .getContentAsString(StandardCharsets.UTF_8));
             }

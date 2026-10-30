@@ -234,7 +234,7 @@ Os testes estão em `src/test/java/br/com/olius/olius_core_api`:
 | `exception/SafeExceptionDiagnosticTest` | SQLSTATE encadeado, proteção contra ciclos e rejeição de conteúdo arbitrário. |
 | `exception/PersistenceExceptionTranslatorTest` | Metadados conhecidos, causas encadeadas, concorrência, indisponibilidade e fallback conservador. |
 | `security/ProblemSecurityHandlersTest` | Serialização das respostas 401/403, cabeçalhos e resposta já enviada. Não percorre a cadeia completa de segurança. |
-| `OliusApiApplicationTests` | Integração com PostgreSQL, estrutura de 58 tabelas públicas (55 da aplicação e 3 do catálogo), duplicidade de e-mail, telefone, CPF, CNPJ e dos dois tipos de responsável de PEV, auditoria, CHECKs e falhas de flush/commit. |
+| `OliusApiApplicationTests` | Integração com PostgreSQL, estrutura de 61 tabelas públicas (58 dos scripts principais e 3 do catálogo), duplicidade de e-mail, telefone, CPF, CNPJ e dos dois tipos de responsável de PEV, auditoria, CHECKs e falhas de flush/commit. |
 | `testfixture/FlushProbe` | Entidade exclusiva de teste para provocar falha real de persistência JPA. |
 
 ### Funcionamento previsto
@@ -281,15 +281,16 @@ Local: `src/test/resources/db/olius/`.
 1. `01_structure.sql`: tabelas e objetos estruturais.
 2. `02_check_constraints.sql`: restrições de validação do banco.
 3. `03_indexes.sql`: índices.
-4. `04_functions_procedures_window_functions.sql`: functions e procedures, incluindo sessões.
+4. `04_functions_procedures.sql`: functions e procedures, incluindo sessões e convites administrativos.
 5. `05_triggers.sql`: triggers e funções associadas.
-6. `data_catalog/01` a `04` e `access_control/01_roles.sql`: catálogo e permissões.
+6. `06_ctes.sql`, `07_window_functions.sql` e `08_materialized_views.sql`: views anuais e Data Mart exigidos pelo contrato atual de permissões.
+7. `data_catalog/01` a `04` e `access_control/01_roles.sql`: catálogo e permissões.
 
 São cópias utilizadas como recursos de teste. A fixture `OfficialPostgres` lê e executa os arquivos com JDBC antes do contexto Spring, preservando os blocos SQL completos. Não são migrations nem scripts executados na inicialização normal da API. O script 04 está finalizado e integra a preparação atual.
 
 Há estruturas auxiliares exclusivas dos testes: schema `test_support`, tabela `flush_probe` e tabela temporária `commit_probe`. Não representam novas entidades de negócio.
 
-Quando os scripts oficiais mudarem, as cópias precisam ser sincronizadas e os testes revisados, inclusive a expectativa atual de 58 tabelas em public. A existência de tabelas de auditoria não basta para preenchê-las: são necessárias as rotinas e o contexto de execução adequados.
+Quando os scripts oficiais mudarem, as cópias precisam ser sincronizadas e os testes revisados, inclusive a expectativa atual de 61 tabelas em public. A existência de tabelas de auditoria não basta para preenchê-las: são necessárias as rotinas e o contexto de execução adequados.
 
 ## 11. Relação com o CI e execução local
 
@@ -395,3 +396,12 @@ Não usar Bean Validation para substituir regras que dependem do estado do siste
 - O tratamento não substitui permissões, integridade do banco, rotinas de auditoria ou transações.
 - A resposta padronizada não abrange automaticamente falhas de startup, tarefas em segundo plano ou filtros externos.
 - A suíte foi validada localmente conforme a seção 10; isso não substitui a execução do CI nem comprova funcionalidades ainda não implementadas.
+
+
+## Evolução administrativa (20/10/2026)
+
+`ADMIN_INVITATION_DELIVERY_FAILED` usa HTTP 503 e informa que o convite foi registrado, mas a entrega não foi confirmada. Não há reenvio automático: nova emissão substitui o segredo anterior. A falta de adapter retorna SERVICE_UNAVAILABLE antes de emitir.
+
+`AdminRoutineErrors` é um tradutor local das rotinas administrativas; não altera o significado global de 42501/55000. O controle oficial é verificado antes de traduzir rejeições de negócio. A ausência de `admin_guard_state` continua erro interno. Leitura de hash, bootstrap não autorizado e ACL real não são convertidos em erros comuns do convite. Nenhuma mensagem SQL livre é examinada ou devolvida.
+
+A documentação e os números de execuções anteriores acima são evidências históricas; a validação da evolução administrativa é registrada após executar a suíte atual.

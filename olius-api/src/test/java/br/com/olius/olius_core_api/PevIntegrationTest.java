@@ -78,6 +78,9 @@ class PevIntegrationTest {
 
         assertThatThrownBy(() -> qrIdentification.identify("invalid",validator.id(),UserType.CITIZENS))
             .isInstanceOf(ResourceNotFoundException.class);
+        String unknownQr="A".repeat(43);
+        assertThatThrownBy(() -> qrIdentification.identify(unknownQr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(ResourceNotFoundException.class);
         String ownQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
             String.class,validator.id());
         assertThatThrownBy(() -> qrIdentification.identify(ownQr,validator.id(),UserType.CITIZENS))
@@ -116,7 +119,37 @@ class PevIntegrationTest {
             .contentType(MediaType.APPLICATION_JSON).content("{\"qrToken\":\"\"}"))
             .andExpect(status().isBadRequest());
         mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
-            .contentType(MediaType.APPLICATION_JSON).content("{\"qrToken\":\"unknown\"}"))
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken","A".repeat(43)))))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test void approvedEstablishmentPevIdentifiesOnlyCitizenQrTokens() throws Exception {
+        var validator=establishment();
+        var beneficiary=citizen();
+        String access=login(validator.email());
+        String citizenQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        String establishmentQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,validator.id());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE establishment_id=?",
+            adminId,validator.id());
+        assertThat(qrIdentification.identify(citizenQr,validator.id(),UserType.ESTABLISHMENT))
+            .extracting(QrIdentificationService.IdentifiedCitizen::id,
+                QrIdentificationService.IdentifiedCitizen::name)
+            .containsExactly(beneficiary.id(),"Cidadão");
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken",citizenQr))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.name").value("Cidadão"));
+        assertThatThrownBy(() -> qrIdentification.identify(establishmentQr,validator.id(),UserType.ESTABLISHMENT))
+            .isInstanceOf(ResourceNotFoundException.class);
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken",establishmentQr))))
             .andExpect(status().isNotFound());
     }
 
@@ -285,6 +318,18 @@ class PevIntegrationTest {
         var response=mvc.perform(post("/api/v1/auth/registrations/citizens")
             .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
                 "name","Cidadão","email",email,"password",PASSWORD,"cpf",digits(11)))))
+            .andExpect(status().isCreated()).andReturn();
+        return new Account(UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("id").asText()),email);
+    }
+
+    private Account establishment() throws Exception {
+        UUID type=UUID.randomUUID();
+        admin().update("INSERT INTO establishment_type(id,name) VALUES (?,?)",type,"Tipo-"+type);
+        String email=email();
+        var response=mvc.perform(post("/api/v1/auth/registrations/establishments")
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+                "name","Estabelecimento PEV","email",email,"password",PASSWORD,
+                "cnpj",digits(14),"typeId",type,"address",commercialAddress()))))
             .andExpect(status().isCreated()).andReturn();
         return new Account(UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("id").asText()),email);
     }
