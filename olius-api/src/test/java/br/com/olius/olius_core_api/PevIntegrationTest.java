@@ -87,6 +87,39 @@ class PevIntegrationTest {
             .isInstanceOf(ResourceNotFoundException.class);
     }
 
+    @Test void qrIdentificationEndpointRequiresBearerAndReturnsMinimalCitizenData() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        String body=json.writeValueAsString(Map.of("qrToken",qr));
+        mvc.perform(post("/api/v1/qr/resolutions").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        String access=login(validator.email());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE citizen_id=?",
+            adminId,validator.id());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.name").value("Cidadão"))
+            .andExpect(jsonPath("$.qrToken").doesNotExist())
+            .andExpect(jsonPath("$.cpf").doesNotExist())
+            .andExpect(jsonPath("$.email").doesNotExist());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"qrToken\":\"\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"qrToken\":\"unknown\"}"))
+            .andExpect(status().isNotFound());
+    }
+
     @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
         var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var paths=json.readTree(response.getResponse().getContentAsString()).get("paths");
