@@ -1,6 +1,9 @@
 package br.com.olius.olius_core_api;
 
 import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
+import br.com.olius.olius_core_api.entity.enums.UserType;
+import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
+import br.com.olius.olius_core_api.service.QrIdentificationService;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -24,6 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -41,7 +45,47 @@ class PevIntegrationTest {
     }
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired QrIdentificationService qrIdentification;
     private static final String PASSWORD="Password1!";
+
+    @Test void qrIdentificationRequiresApprovedPevAndKeepsTheTokenUnchanged() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        assertThatThrownBy(() -> qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        String access=login(validator.email());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        assertThatThrownBy(() -> qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE citizen_id=?",
+            adminId,validator.id());
+        assertThat(qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .extracting(QrIdentificationService.IdentifiedCitizen::id,
+                QrIdentificationService.IdentifiedCitizen::name)
+            .containsExactly(beneficiary.id(),"Cidadão");
+        assertThat(qrIdentification.identify(qr,validator.id(),UserType.CITIZENS).id())
+            .isEqualTo(beneficiary.id());
+        assertThat(admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id())).isEqualTo(qr);
+
+        assertThatThrownBy(() -> qrIdentification.identify("invalid",validator.id(),UserType.CITIZENS))
+            .isInstanceOf(ResourceNotFoundException.class);
+        String ownQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,validator.id());
+        assertThatThrownBy(() -> qrIdentification.identify(ownQr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",beneficiary.id());
+        assertThatThrownBy(() -> qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(ResourceNotFoundException.class);
+    }
 
     @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
         var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
