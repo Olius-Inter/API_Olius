@@ -110,11 +110,12 @@ class CollectionOperationsIntegrationTest {
         mvc.perform(post(REQUESTS+id+"/service-acceptance").header("Authorization","Bearer "+other.access())).andExpect(status().isNotFound());
         mvc.perform(post(REQUESTS+id+"/service-acceptance").header("Authorization","Bearer "+adminAccess)).andExpect(status().isForbidden());
         var first=operations.accept(id,shop.id());assertThat(operations.accept(id,shop.id()).acceptance()).isEqualTo(first.acceptance());
-        assertThatThrownBy(()->requests.cancel(id,shop.id(),false,new CollectionRequestContracts.Reason("Desistência"))).isInstanceOf(BusinessRuleException.class);
+        UUID establishment=shop.id();var cancellation=new CollectionRequestContracts.Reason("Desistência");
+        assertThatThrownBy(()->requests.cancel(id,establishment,false,cancellation)).isInstanceOf(BusinessRuleException.class);
     }
     @Test void normalCollectionUsesOfficialPointsAndServerTimeWithoutFreeDml() throws Exception {
         UUID id=ready();Instant before=Instant.now();
-        var response=mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),record("10"),null))
+        var response=mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),collectionInput("10"),null))
             .andExpect(status().isOk()).andExpect(jsonPath("$.collection.result").value("SUCCESSFUL"))
             .andExpect(jsonPath("$.calculation.nominalPoints").value(60)).andReturn();
         UUID collection=UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("collection").get("id").asText());
@@ -128,17 +129,17 @@ class CollectionOperationsIntegrationTest {
     }
     @ParameterizedTest @ValueSource(strings={"9","11"})
     void toleranceBoundariesAreInclusive(String liters) {
-        var result=operations.record(ready(),record(liters));assertThat(result.collection().result()).isEqualTo(CollectionResult.SUCCESSFUL);
+        var result=operations.registerCollection(ready(),collectionInput(liters));assertThat(result.collection().result()).isEqualTo(CollectionResult.SUCCESSFUL);
     }
     @Test void missingAcceptanceDoesNotCreateAnEvent() throws Exception {
         UUID id=scheduled();operations.arrival(id,access);
-        mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),record("10"),null)).andExpect(status().isConflict());assertNoCollection(id);
+        mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),collectionInput("10"),null)).andExpect(status().isConflict());assertNoCollection(id);
     }
     @Test void multipleFailuresApplyOnePenaltyAndCountActualVolumeOnce() {
-        operations.record(ready(),record("10"));UUID id=ready();
+        operations.registerCollection(ready(),collectionInput("10"));UUID id=ready();
         var input=new Record(access,decimal("8"),decimal("10"),OilCondition.UNACCEPTABLE,true,
                 List.of("VOLUME_OUT_OF_TOLERANCE","OIL_UNACCEPTABLE","COMPROMISING_OCCURRENCE"),"Óleo e ocorrência verificados");
-        var result=operations.record(id,input);
+        var result=operations.registerCollection(id,input);
         assertThat(result.calculation().nominalPoints()).isEqualTo(-50);assertThat(result.calculation().balanceAfter()).isEqualTo(10);
         assertThat(result.calculation().components()).containsExactly(new PointComponent("FAILURE_PENALTY",-50));
         var metrics=reads.metrics(adminId,driverId,new Period(null,null));
@@ -150,7 +151,7 @@ class CollectionOperationsIntegrationTest {
     @Test void zeroPresentedRequiresObservationAndDoesNotAdvanceRecurrence() throws Exception {
         UUID id=ready();var input=new Record(access,decimal("0"),decimal("0"),OilCondition.NOT_ASSESSED,false,List.of("VOLUME_OUT_OF_TOLERANCE"),null);
         mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),input,null)).andExpect(status().isUnprocessableContent());assertNoCollection(id);
-        var result=operations.record(id,new Record(access,decimal("0"),decimal("0"),OilCondition.NOT_ASSESSED,false,List.of("VOLUME_OUT_OF_TOLERANCE"),"Sem óleo apresentado"));
+        var result=operations.registerCollection(id,new Record(access,decimal("0"),decimal("0"),OilCondition.NOT_ASSESSED,false,List.of("VOLUME_OUT_OF_TOLERANCE"),"Sem óleo apresentado"));
         assertThat(result.calculation().nominalPoints()).isEqualTo(-50);assertThat(result.calculation().balanceAfter()).isZero();
         assertThat(reads.score(shop.id()).successfulCollectionsCount()).isZero();
     }
@@ -163,23 +164,25 @@ class CollectionOperationsIntegrationTest {
         assertNoCollection(id);
     }
     @Test void replayPreservesOriginalDateAndRejectsDivergentPayload() {
-        UUID id=ready();var first=operations.record(id,record("10"));var second=operations.record(id,record("10"));
+        UUID id=ready();var first=operations.registerCollection(id,collectionInput("10"));var second=operations.registerCollection(id,collectionInput("10"));
         assertThat(second).isEqualTo(first);assertThat(countCollections()).isEqualTo(1);
-        assertThatThrownBy(()->operations.record(id,record("11"))).isInstanceOf(ResourceConflictException.class);
+        var changed=collectionInput("11");
+        assertThatThrownBy(()->operations.registerCollection(id,changed)).isInstanceOf(ResourceConflictException.class);
         assertThat(reads.score(shop.id()).points()).isEqualTo(60);
     }
     @Test void replayAfterCorrectionUsesOriginalPayloadAndCurrentCalculation() {
-        UUID id=ready();var original=operations.record(id,record("10"));
+        UUID id=ready();var original=operations.registerCollection(id,collectionInput("10"));
         owner.update("CALL public.correct_collection(?,1,?,'RECORDED',11,11,'ACCEPTABLE',false,ARRAY[]::text[],'Corrigido','Verificação')",original.collection().id(),adminId);
-        var replay=operations.record(id,record("10"));assertThat(replay.collection().revision()).isEqualTo(2);
+        var replay=operations.registerCollection(id,collectionInput("10"));assertThat(replay.collection().revision()).isEqualTo(2);
         assertThat(replay.calculation().nominalPoints()).isEqualTo(61);assertThat(replay.collection().collectionDate()).isEqualTo(original.collection().collectionDate());
-        assertThatThrownBy(()->operations.record(id,record("11"))).isInstanceOf(ResourceConflictException.class);
+        var changed=collectionInput("11");
+        assertThatThrownBy(()->operations.registerCollection(id,changed)).isInstanceOf(ResourceConflictException.class);
     }
     @Test void replayDoesNotRevalidateAnInactiveHistoricalReason() {
         UUID id=ready();var input=new Record(access,decimal("10"),decimal("10"),OilCondition.UNACCEPTABLE,false,List.of("OIL_UNACCEPTABLE"),"Qualidade inadequada");
-        var first=operations.record(id,input);
+        var first=operations.registerCollection(id,input);
         owner.update("UPDATE collection_failure_reason SET status='INACTIVE' WHERE code='OIL_UNACCEPTABLE'");
-        try { assertThat(operations.record(id,input)).isEqualTo(first); }
+        try { assertThat(operations.registerCollection(id,input)).isEqualTo(first); }
         finally { owner.update("UPDATE collection_failure_reason SET status='ACTIVE' WHERE code='OIL_UNACCEPTABLE'"); }
     }
     @ParameterizedTest @ValueSource(strings={"ESTABLISHMENT_CLOSED","NO_RESPONSIBLE_AVAILABLE"})
@@ -206,13 +209,13 @@ class CollectionOperationsIntegrationTest {
         UUID id=ready();owner.update("UPDATE subscription_cycle SET volume_limit_liters=10,collection_limit=1 WHERE id=?",shop.cycle());
         owner.update("UPDATE establishment_subscription SET status='INACTIVE',inactivated_at=clock_timestamp() WHERE id=?",shop.subscription());
         var input=new Record(access,decimal("12"),decimal("12"),OilCondition.ACCEPTABLE,false,List.of("VOLUME_OUT_OF_TOLERANCE"),null);
-        operations.record(id,input);var availability=requests.availability(shop.cycle(),shop.id());
+        operations.registerCollection(id,input);var availability=requests.availability(shop.cycle(),shop.id());
         assertThat(availability.consumedVolumeLiters()).isEqualByComparingTo("12");assertThat(availability.canAcceptNewRequest()).isFalse();
     }
     @Test void recurrenceAndAnnualSourceStayCorrectAtTenthTwentiethHundredthAndBeyond() {
         long total=0;
         for(int n=1;n<=110;n++) {
-            var result=operations.record(ready(),record("10"));long bonus=n%10==0 ? Math.min(n,100) : 0;total+=60+bonus;
+            var result=operations.registerCollection(ready(),collectionInput("10"));long bonus=n%10==0 ? Math.min(n,100) : 0;total+=60+bonus;
             if(n%10==0) assertThat(result.calculation().components()).contains(new PointComponent("RECURRENCE_BONUS",bonus));
         }
         assertThat(reads.score(shop.id()).points()).isEqualTo(total);
@@ -220,7 +223,7 @@ class CollectionOperationsIntegrationTest {
         assertThat(owner.queryForObject("SELECT has_table_privilege('olius_test_api','vw_annual_scores','SELECT')",Boolean.class)).isFalse();
     }
     @Test void concurrentEquivalentSubmissionsCreateOneEventAndReuseTheDate() throws Exception {
-        UUID id=ready();var results=parallel(()->operations.record(id,record("10")),()->operations.record(id,record("10")));
+        UUID id=ready();var results=parallel(()->operations.registerCollection(id,collectionInput("10")),()->operations.registerCollection(id,collectionInput("10")));
         assertThat(results.get(0)).isEqualTo(results.get(1));assertThat(countCollections()).isEqualTo(1);assertThat(reads.score(shop.id()).points()).isEqualTo(60);
     }
     @Test void acceptanceAndCancellationRaceCannotLeaveBothEffects() throws Exception {
@@ -234,13 +237,13 @@ class CollectionOperationsIntegrationTest {
         UUID id=ready();
         owner.execute("CREATE FUNCTION test_support.fail_collection_points() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture'; END $$");
         owner.execute("CREATE TRIGGER fail_collection_points BEFORE INSERT ON point_calculation FOR EACH ROW WHEN (NEW.user_id='"+shop.id()+"'::uuid) EXECUTE FUNCTION test_support.fail_collection_points()");
-        try { mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),record("10"),null)).andExpect(status().isInternalServerError()); }
+        try { mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),collectionInput("10"),null)).andExpect(status().isInternalServerError()); }
         finally { owner.execute("DROP TRIGGER fail_collection_points ON point_calculation");owner.execute("DROP FUNCTION test_support.fail_collection_points()"); }
         assertNoCollection(id);assertThat(reads.score(shop.id()).points()).isZero();
         assertThat(owner.queryForObject("SELECT count(*) FROM collection_log WHERE collection_request_id=?",Integer.class,id)).isZero();
     }
     @Test void readsAreOwnerScopedAndMetricsUsePhysicalPeriodWithoutAnnulledVisits() throws Exception {
-        var first=operations.record(ready(),record("10"));var second=operations.record(ready(),record("10"));
+        var first=operations.registerCollection(ready(),collectionInput("10"));var second=operations.registerCollection(ready(),collectionInput("10"));
         owner.update("CALL public.correct_collection(?,1,?,'ANNULLED',10,10,'ACCEPTABLE',false,ARRAY[]::text[],'Anulado','Duplicidade documental')",second.collection().id(),adminId);
         var metrics=reads.metrics(adminId,driverId,new Period(first.collection().collectionDate(),first.collection().collectionDate().plusNanos(1000000)));
         assertThat(metrics.visits()).isEqualTo(1);assertThat(metrics.establishmentsVisited()).isEqualTo(1);
@@ -251,10 +254,10 @@ class CollectionOperationsIntegrationTest {
         assertThat(reads.detail(second.collection().id(),shop.id(),false).collection().recordStatus()).isEqualTo(RecordStatus.ANNULLED);
     }
     @Test void inputCannotControlTimePointsResultOrIdentityAndMissingExecuteStaysInternal() throws Exception {
-        UUID id=ready();var map=json.convertValue(record("10"),new tools.jackson.core.type.TypeReference<Map<String,Object>>() { });map.put("collectionDate","2020-01-01T00:00:00Z");
+        UUID id=ready();var map=json.convertValue(collectionInput("10"),new tools.jackson.core.type.TypeReference<Map<String,Object>>() { });map.put("collectionDate","2020-01-01T00:00:00Z");
         mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),map,null)).andExpect(status().isBadRequest());
         owner.execute("REVOKE EXECUTE ON PROCEDURE public.record_collection(uuid,uuid,numeric,numeric,public.oil_condition_t,boolean,text[],text,timestamptz) FROM olius_api");
-        try { mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),record("10"),null)).andExpect(status().isInternalServerError()); }
+        try { mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),collectionInput("10"),null)).andExpect(status().isInternalServerError()); }
         finally { owner.execute("GRANT EXECUTE ON PROCEDURE public.record_collection(uuid,uuid,numeric,numeric,public.oil_condition_t,boolean,text[],text,timestamptz) TO olius_api"); }
         assertNoCollection(id);
     }
@@ -266,7 +269,7 @@ class CollectionOperationsIntegrationTest {
         assertThat(paths.get("/api/v1/admin/drivers/{id}/metrics").get("get").get("description").asText()).contains("Cada visita conta uma vez");
     }
     @Test void queriesAndMetricsExposeOnlyCurrentCalculationsAndValidatedPeriods() throws Exception {
-        var result=operations.record(ready(),record("10"));UUID id=result.collection().id();
+        var result=operations.registerCollection(ready(),collectionInput("10"));UUID id=result.collection().id();
         for(String route:List.of("/api/v1/admin/collections","/api/v1/admin/drivers/"+driverId+"/collections"))
             mvc.perform(get(route).param("result","SUCCESSFUL").param("recordStatus","RECORDED")
                     .header("Authorization","Bearer "+adminAccess)).andExpect(status().isOk())
@@ -282,27 +285,58 @@ class CollectionOperationsIntegrationTest {
                 .param("until","2026-01-01T00:00:00Z").header("Authorization","Bearer "+adminAccess)).andExpect(status().isBadRequest());
         var empty=reads.metrics(adminId,driverId,new Period(null,result.collection().collectionDate()));
         assertThat(empty.visits()).isZero();assertThat(empty.lastCollectionDate()).isNull();
-        assertThatThrownBy(()->reads.detail(UUID.randomUUID(),adminId,true)).isInstanceOf(ResourceNotFoundException.class);
+        UUID missing=UUID.randomUUID();
+        assertThatThrownBy(()->reads.detail(missing,adminId,true)).isInstanceOf(ResourceNotFoundException.class);
     }
     @Test void actualUnsuccessfulVolumeParticipatesInOfficialCertificateReconciliation() {
         UUID level=UUID.randomUUID();owner.update("INSERT INTO certificate_level(id,name,required_liters) VALUES (?,?,18)",level,"Teste-"+level);
-        operations.record(ready(),record("10"));
-        operations.record(ready(),new Record(access,decimal("8"),decimal("10"),OilCondition.ACCEPTABLE,false,List.of("VOLUME_OUT_OF_TOLERANCE"),null));
+        operations.registerCollection(ready(),collectionInput("10"));
+        operations.registerCollection(ready(),new Record(access,decimal("8"),decimal("10"),OilCondition.ACCEPTABLE,false,List.of("VOLUME_OUT_OF_TOLERANCE"),null));
         assertThat(owner.queryForObject("SELECT count(*) FROM certificate WHERE establishment_id=? AND certificate_level_id=?",Integer.class,shop.id(),level)).isEqualTo(1);
     }
     @Test void administrativeReplaysCannotChangeOriginalActorOrReason() {
         UUID id=scheduled();operations.arrival(id,access);
         var input=new FailedVisit(AdministrativeFailureReason.ESTABLISHMENT_CLOSED,"Confirmado");operations.failedVisit(id,adminId,input);
-        assertThatThrownBy(()->operations.failedVisit(id,adminId,new FailedVisit(AdministrativeFailureReason.NO_RESPONSIBLE_AVAILABLE,"Confirmado"))).isInstanceOf(ResourceConflictException.class);
+        var differentReason=new FailedVisit(AdministrativeFailureReason.NO_RESPONSIBLE_AVAILABLE,"Confirmado");
+        assertThatThrownBy(()->operations.failedVisit(id,adminId,differentReason)).isInstanceOf(ResourceConflictException.class);
         UUID other=UUID.randomUUID();owner.update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Outro',?,?,'ADMIN')",other,other+"@test.invalid",hash);
         assertThatThrownBy(()->operations.failedVisit(id,other,input)).isInstanceOf(ResourceConflictException.class);
+    }
+    @Test void oversizedOperationalInputsAreRejectedBeforeTheyCreateAnyEffects() throws Exception {
+        UUID id=scheduled();String oversized="x".repeat(1001);
+        var observation=new Record(access,decimal("10"),decimal("10"),OilCondition.ACCEPTABLE,false,List.of(),oversized);
+        var reasons=new Record(access,decimal("0"),decimal("0"),OilCondition.NOT_ASSESSED,false,
+                Collections.nCopies(101,"VOLUME_OUT_OF_TOLERANCE"),"Sem óleo");
+        for(var payload:List.of(observation,reasons))
+            mvc.perform(body(post(OPS+"/requests/"+id+"/collection"),payload,null))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        mvc.perform(body(post(ADMIN+id+"/failed-visit"),new FailedVisit(AdministrativeFailureReason.ESTABLISHMENT_CLOSED,oversized),adminAccess))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        assertNoCollection(id);assertThat(requests.detail(id,shop.id(),false).arrival()).isNull();
+    }
+    @Test void technicalInputBoundariesStillAllowNormalAndAdministrativeRecords() throws Exception {
+        String text="x".repeat(1000);UUID normal=ready();
+        var payload=new Record(access,decimal("0"),decimal("0"),OilCondition.NOT_ASSESSED,false,
+                Collections.nCopies(100,"VOLUME_OUT_OF_TOLERANCE"),text);
+        mvc.perform(body(post(OPS+"/requests/"+normal+"/collection"),payload,null))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.collection.failureReasonCodes.length()").value(1));
+        UUID administrative=scheduled();operations.arrival(administrative,access);
+        mvc.perform(body(post(ADMIN+administrative+"/failed-visit"),new FailedVisit(AdministrativeFailureReason.ESTABLISHMENT_CLOSED,text),adminAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.calculation.nominalPoints").value(-50));
+    }
+    @Test void documentRegexStaysAsciiAndQrRemainsAParameterizedValue() throws Exception {
+        var nonAscii=new DriverAccess("١".repeat(11),access.cnh(),shop.qr());
+        mvc.perform(body(post(OPS+"/context"),nonAscii,null)).andExpect(status().isBadRequest());
+        var attemptedSql=new DriverAccess(access.cpf(),access.cnh(),"' OR '1'='1");
+        mvc.perform(body(post(OPS+"/context"),attemptedSql,null)).andExpect(status().isForbidden());
+        assertThat(operations.context(access,0,20).establishmentId()).isEqualTo(shop.id());
     }
     private UUID scheduled() {
         var created=requests.create(shop.id(),new CollectionRequestContracts.Create(decimal("10"),null),UUID.randomUUID());
         requests.schedule(created.id(),adminId,new CollectionRequestContracts.Scheduling(Instant.now().plusSeconds(86400),Instant.now().minusSeconds(1),"Acordado externamente"));return created.id();
     }
     private UUID ready() { UUID id=scheduled();operations.arrival(id,access);operations.accept(id,shop.id());return id; }
-    private Record record(String liters) { return new Record(access,decimal(liters),decimal(liters),OilCondition.ACCEPTABLE,false,List.of(),null); }
+    private Record collectionInput(String liters) { return new Record(access,decimal(liters),decimal(liters),OilCondition.ACCEPTABLE,false,List.of(),null); }
     private BigDecimal decimal(String value) { return new BigDecimal(value); }
     private void assertNoCollection(UUID id) { assertThat(owner.queryForObject("SELECT count(*) FROM collection WHERE collection_request_id=?",Integer.class,id)).isZero(); }
     private int countCollections() { return owner.queryForObject("SELECT count(*) FROM collection WHERE establishment_id=?",Integer.class,shop.id()); }

@@ -2,6 +2,8 @@ package br.com.olius.olius_core_api.security;
 import br.com.olius.olius_core_api.exception.ApiProblemFactory;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.*;
 import tools.jackson.databind.ObjectMapper;
 import static org.assertj.core.api.Assertions.*;
@@ -53,6 +55,20 @@ class AuthRateLimitFilterTest {
         var response=new MockHttpServletResponse();
         filter.doFilter(new MockHttpServletRequest("POST","/api/v1/operations/b2b/requests/abc/arrival"),response,(req,res)-> { throw new AssertionError("Limite operacional"); });
         assertThat(response.getStatus()).isEqualTo(429);
+        var login=new MockHttpServletResponse();
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/auth/mobile/login"),login,(req,res)->res.getWriter().write("allowed"));
+        assertThat(login.getContentAsString()).isEqualTo("allowed");
+    }
+    @ParameterizedTest @ValueSource(strings={"/api/v1/operations/b2b/context","/api/v1/operations/%62%32b/context"})
+    void encodedAndPlainOperationalPathsUseOneBucketAndDoNotConsumeLogin(String firstPath) throws Exception {
+        var filter=new AuthRateLimitFilter(new AuthRateLimiter(1,10,Clock.systemUTC()),new ApiProblemFactory(),new ObjectMapper());
+        filter.doFilter(new MockHttpServletRequest("POST",firstPath),new MockHttpServletResponse(),(req,res)-> { });
+        var plain=new MockHttpServletResponse();
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/operations/b2b/context"),plain,(req,res)-> { throw new AssertionError("Same bucket"); });
+        assertThat(plain.getStatus()).isEqualTo(429);
+        var encoded=new MockHttpServletResponse();
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/operations/%62%32b/context"),encoded,(req,res)-> { throw new AssertionError("Same bucket"); });
+        assertThat(encoded.getStatus()).isEqualTo(429);
         var login=new MockHttpServletResponse();
         filter.doFilter(new MockHttpServletRequest("POST","/api/v1/auth/mobile/login"),login,(req,res)->res.getWriter().write("allowed"));
         assertThat(login.getContentAsString()).isEqualTo("allowed");

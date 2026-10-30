@@ -6,6 +6,8 @@ import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -117,7 +119,8 @@ class DriverAdministrationIntegrationTest {
     @Test void inactiveAdminIsRejectedByServiceEvenWithoutHttpFilter() {
         owner.update("INSERT INTO users(name,email,password_hash,user_type) VALUES ('Backup',?,'hash-teste','ADMIN')",UUID.randomUUID()+"@test.invalid");
         owner.update("UPDATE users SET status='INACTIVE' WHERE id=?",adminId);
-        assertThatThrownBy(()->service.create(adminId,new Create("Negado",document(),document()))).isInstanceOf(AccessDeniedException.class);
+        var input=new Create("Negado",document(),document());
+        assertThatThrownBy(()->service.create(adminId,input)).isInstanceOf(AccessDeniedException.class);
     }
     @Test void unauthenticatedAndNonAdminCannotReadPersonalDocuments() throws Exception {
         mvc.perform(get(ROOT)).andExpect(status().isUnauthorized());
@@ -128,7 +131,9 @@ class DriverAdministrationIntegrationTest {
             .andExpect(status().isOk()).andReturn();
         String citizenAccess=json.readTree(login.getResponse().getContentAsString()).get("accessToken").asText();
         mvc.perform(get(ROOT).header("Authorization","Bearer "+citizenAccess)).andExpect(status().isForbidden());
-        assertThatThrownBy(()->service.detail(UUID.randomUUID(),UUID.randomUUID())).isInstanceOf(AccessDeniedException.class);
+        UUID nonexistentActor=UUID.randomUUID();
+        UUID nonexistentDriver=UUID.randomUUID();
+        assertThatThrownBy(()->service.detail(nonexistentActor,nonexistentDriver)).isInstanceOf(AccessDeniedException.class);
     }
     @Test void missingDriverIsNotFoundAndUnknownFiltersAreInvalid() throws Exception {
         mvc.perform(get(ROOT+"/"+UUID.randomUUID()).header("Authorization","Bearer "+access)).andExpect(status().isNotFound());
@@ -139,6 +144,20 @@ class DriverAdministrationIntegrationTest {
         var paths=json.readTree(result.getResponse().getContentAsString()).get("paths");
         assertThat(paths.get(ROOT).get("post").get("description").asText()).contains("Não cria usuário");
         assertThat(paths.get(ROOT).get("get").get("security").toString()).contains("bearer");
+    }
+    @ParameterizedTest @ValueSource(strings={"cpf","cnh"})
+    void updateToExistingDocumentReturnsConflictWithoutLeakingOrChangingTheDriver(String field) throws Exception {
+        var original=service.create(adminId,new Create("Original",document(),document()));
+        var target=service.create(adminId,new Create("Destino",document(),document()));
+        String duplicate=field.equals("cpf") ? original.cpf() : original.cnh();
+        var response=mvc.perform(body(patch(ROOT+"/"+target.id()),Map.of(field,duplicate)))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("RESOURCE_CONFLICT")).andReturn();
+        assertThat(response.getResponse().getContentAsString()).doesNotContain(original.cpf(),original.cnh(),target.cpf(),target.cnh(),"driver_cpf_key","driver_cnh_key");
+        assertThat(service.detail(adminId,target.id())).isEqualTo(target);
+    }
+    @Test void updateAndStatusForMissingDriversReturnNotFound() throws Exception {
+        mvc.perform(body(patch(ROOT+"/"+UUID.randomUUID()),Map.of("name","Ausente"))).andExpect(status().isNotFound());
+        mvc.perform(body(patch(ROOT+"/"+UUID.randomUUID()+"/status"),Map.of("status","INACTIVE"))).andExpect(status().isNotFound());
     }
     private MockHttpServletRequestBuilder body(MockHttpServletRequestBuilder request,Object payload) throws Exception {
         return request.header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(payload));
