@@ -47,4 +47,14 @@ class AuthRateLimitFilterTest {
         assertThat(response.getStatus()).isEqualTo(429); assertThat(response.getHeader("Retry-After")).isEqualTo("60");
         assertThat(response.getContentAsString()).contains("RATE_LIMITED");
     }
+    @Test void operationalActionsShareTheirOwnQuotaWithoutConsumingLoginQuota() throws Exception {
+        var filter=new AuthRateLimitFilter(new AuthRateLimiter(1,10,Clock.systemUTC()),new ApiProblemFactory(),new ObjectMapper());
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/operations/b2b/context"),new MockHttpServletResponse(),(req,res)-> { });
+        var response=new MockHttpServletResponse();
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/operations/b2b/requests/abc/arrival"),response,(req,res)-> { throw new AssertionError("Limite operacional"); });
+        assertThat(response.getStatus()).isEqualTo(429);
+        var login=new MockHttpServletResponse();
+        filter.doFilter(new MockHttpServletRequest("POST","/api/v1/auth/mobile/login"),login,(req,res)->res.getWriter().write("allowed"));
+        assertThat(login.getContentAsString()).isEqualTo("allowed");
+    }
 }
