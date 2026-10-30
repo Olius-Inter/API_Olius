@@ -1,6 +1,9 @@
 package br.com.olius.olius_core_api;
 
 import br.com.olius.olius_core_api.testfixture.OfficialPostgres;
+import br.com.olius.olius_core_api.entity.enums.UserType;
+import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
+import br.com.olius.olius_core_api.service.QrIdentificationService;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -24,6 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -41,7 +45,113 @@ class PevIntegrationTest {
     }
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired QrIdentificationService qrIdentification;
     private static final String PASSWORD="Password1!";
+
+    @Test void qrIdentificationRequiresApprovedPevAndKeepsTheTokenUnchanged() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        assertThatThrownBy(() -> qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        String access=login(validator.email());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        assertThatThrownBy(() -> qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE citizen_id=?",
+            adminId,validator.id());
+        assertThat(qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .extracting(QrIdentificationService.IdentifiedCitizen::id,
+                QrIdentificationService.IdentifiedCitizen::name)
+            .containsExactly(beneficiary.id(),"Cidadão");
+        assertThat(qrIdentification.identify(qr,validator.id(),UserType.CITIZENS).id())
+            .isEqualTo(beneficiary.id());
+        assertThat(admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id())).isEqualTo(qr);
+
+        assertThatThrownBy(() -> qrIdentification.identify("invalid",validator.id(),UserType.CITIZENS))
+            .isInstanceOf(ResourceNotFoundException.class);
+        String unknownQr="A".repeat(43);
+        assertThatThrownBy(() -> qrIdentification.identify(unknownQr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(ResourceNotFoundException.class);
+        String ownQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,validator.id());
+        assertThatThrownBy(() -> qrIdentification.identify(ownQr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",beneficiary.id());
+        assertThatThrownBy(() -> qrIdentification.identify(qr,validator.id(),UserType.CITIZENS))
+            .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test void qrIdentificationEndpointRequiresBearerAndReturnsMinimalCitizenData() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        String body=json.writeValueAsString(Map.of("qrToken",qr));
+        mvc.perform(post("/api/v1/qr/resolutions").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        String access=login(validator.email());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE citizen_id=?",
+            adminId,validator.id());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.name").value("Cidadão"))
+            .andExpect(jsonPath("$.qrToken").doesNotExist())
+            .andExpect(jsonPath("$.cpf").doesNotExist())
+            .andExpect(jsonPath("$.email").doesNotExist());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"qrToken\":\"\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken","A".repeat(43)))))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test void approvedEstablishmentPevIdentifiesOnlyCitizenQrTokens() throws Exception {
+        var validator=establishment();
+        var beneficiary=citizen();
+        String access=login(validator.email());
+        String citizenQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        String establishmentQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,validator.id());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE establishment_id=?",
+            adminId,validator.id());
+        assertThat(qrIdentification.identify(citizenQr,validator.id(),UserType.ESTABLISHMENT))
+            .extracting(QrIdentificationService.IdentifiedCitizen::id,
+                QrIdentificationService.IdentifiedCitizen::name)
+            .containsExactly(beneficiary.id(),"Cidadão");
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken",citizenQr))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.name").value("Cidadão"));
+        assertThatThrownBy(() -> qrIdentification.identify(establishmentQr,validator.id(),UserType.ESTABLISHMENT))
+            .isInstanceOf(ResourceNotFoundException.class);
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken",establishmentQr))))
+            .andExpect(status().isNotFound());
+    }
 
     @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
         var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
@@ -208,6 +318,18 @@ class PevIntegrationTest {
         var response=mvc.perform(post("/api/v1/auth/registrations/citizens")
             .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
                 "name","Cidadão","email",email,"password",PASSWORD,"cpf",digits(11)))))
+            .andExpect(status().isCreated()).andReturn();
+        return new Account(UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("id").asText()),email);
+    }
+
+    private Account establishment() throws Exception {
+        UUID type=UUID.randomUUID();
+        admin().update("INSERT INTO establishment_type(id,name) VALUES (?,?)",type,"Tipo-"+type);
+        String email=email();
+        var response=mvc.perform(post("/api/v1/auth/registrations/establishments")
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+                "name","Estabelecimento PEV","email",email,"password",PASSWORD,
+                "cnpj",digits(14),"typeId",type,"address",commercialAddress()))))
             .andExpect(status().isCreated()).andReturn();
         return new Account(UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("id").asText()),email);
     }

@@ -112,7 +112,11 @@ public class OpenApiConfiguration {
             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiProblem"))));
     }
     private void documentPevResponse(String path, PathItem.HttpMethod method, Operation operation) {
-        if (path.equals(PEVS_PATH) && method == PathItem.HttpMethod.POST) {
+        if (path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST) {
+            operation.setSummary("Identificar cidadão por QR");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Identificação mínima do cidadão ativo: ID e nome.");
+        } else if (path.equals(PEVS_PATH) && method == PathItem.HttpMethod.POST) {
             operation.setSummary("Solicitar PEV");
             operation.getResponses().computeIfAbsent("201", ignored -> new ApiResponse())
                 .setDescription("PEV PENDING criado; Location aponta para /api/v1/pevs/me.");
@@ -140,6 +144,8 @@ public class OpenApiConfiguration {
     }
 
     private String description(String path, PathItem.HttpMethod method) {
+        if(path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST)
+            return "Responsável ativo por PEV APPROVED identifica cidadão ativo pelo token único do QR. Exige Bearer; retorna somente ID e nome. A leitura não altera o token, não registra entrega nem concede pontos. QR inválido ou desconhecido retorna 404; acesso sem PEV aprovado retorna 403. Autoidentificação é proibida.";
         if(path.startsWith("/api/v1/admin/financial-recovery/")) return "Somente ADMIN ativo. Consultas paginadas de cobranças abertas e reembolsos não concluídos; detalhes por ID incluem estados finais. POST exige justificativa. Reembolso consulta exclusivamente o providerRefundId existente e valida vínculo/valor na Stripe; nunca cria outra devolução. Cobrança reutiliza reconciliação conservadora e não aceita substituição de identidade nem confirmação manual de pagamento. HTTP 200 informa o estado observado, sem garantir resolução; 409 indica estado concorrente/incompatível e 503 falha externa ou integração desabilitada.";
         if(path.equals("/api/v1/billing/upgrade-checkouts")) return "Upgrade do ciclo vigente pelo estabelecimento ativo. Corpo: somente planId; Idempotency-Key UUID obrigatório. Preço e ambos os limites precisam aumentar. Cobra diferença integral, sem pró-rata. Resposta mostra vencimento preservado e projeção de disponibilidade; não altera renovação futura. Novos links exigem mais de 35 minutos de validade, com teto de uma hora e fim do ciclo. Benefícios só após confirmação verificada.";
         if(path.equals("/api/v1/billing/renewal-checkouts")) return "Renovação manual pelo estabelecimento ativo. Corpo contém somente planId; Idempotency-Key UUID obrigatório. A Core identifica o ciclo mais recente e permite antecipar somente o próximo período. Não modifica o ciclo atual nem concede benefícios antes da confirmação. Preço/franquias são congelados no PostgreSQL. Reenvio reutiliza a cobrança e o webhook aplica a renovação.";
