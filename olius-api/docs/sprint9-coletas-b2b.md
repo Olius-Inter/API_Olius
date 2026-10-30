@@ -12,9 +12,6 @@ os certificados pelas rotinas oficiais do PostgreSQL. A API Redis consulta os da
 confirmados para reconstruir o ranking anual. Uma visita não depende de Redis para
 ser confirmada e não envia POST da Core para a API de ranking.
 
-Esta implementação está na branch `feat/sprint9-b2b-collections`. Commits e PR ficam
-para o final, conforme combinado. O CI remoto ainda precisa revisar a entrega.
-
 ## Responsáveis
 
 | Participante | Responsabilidade |
@@ -87,10 +84,14 @@ foi aprovada para o MVP; não há conta de motorista ou verificação GPS invent
 
 Cada ação revalida dados/status/QR e mantém bloqueios compartilhados durante sua
 transação curta. Documentos e QR não são colocados em URLs nem em respostas de
-contexto. DriverAccess tem toString redigido. Em produção, consumir via HTTPS.
+contexto. DriverAccess e os DTOs de motoristas têm toString redigido para não
+expor CPF, CNH ou QR na formatação textual. Isso não remove os campos das
+respostas JSON administrativas autorizadas. Em produção, consumir via HTTPS.
 
 As ações POST operacionais usam limite técnico por IP, na mesma configuração
-`OLIUS_AUTH_REQUESTS_PER_MINUTE`, com contador separado do login. Excedido o limite,
+`OLIUS_AUTH_REQUESTS_PER_MINUTE`, com contador separado do login. A classificação
+usa o mesmo matcher de caminho decodificado do filtro, inclusive quando a URL
+contém caracteres codificados. Excedido o limite,
 retornam 429 e Retry-After. O armazenamento do limitador é local à instância.
 Não enviar um JWT para identificar o motorista: as credenciais do formulário são
 validadas em cada chamada. JWT inválido enviado por engano pode ser rejeitado pelo
@@ -132,7 +133,11 @@ do formulário, chegada e aceite não geram, isoladamente, pontos ou uma coleta.
 
 O motorista informa os fatos; resultado, pontos, ID, ordem de processamento,
 revisão e datas não são campos livres. Não é possível recolher mais do que foi
-apresentado. Os volumes têm até duas casas decimais. Presented igual a zero exige
+apresentado. Os volumes têm até duas casas decimais. Observação e justificativa
+administrativa têm limite técnico de 1000 caracteres; a lista aceita até 100
+entradas de motivos, cada código com até 50 caracteres. Esses limites protegem o
+processamento do formulário e não alteram o catálogo ou os efeitos de negócio no
+PostgreSQL. Volume apresentado igual a zero exige
 NOT_ASSESSED; volume apresentado positivo exige ACCEPTABLE ou UNACCEPTABLE.
 Ausência de óleo, óleo inadequado ou ocorrência comprometedora exigem observação.
 
@@ -295,7 +300,7 @@ Correções/anulações por endpoints e reconstrução administrativa permanecem
 Sprint 10. Os testes podem exercitar as rotinas já existentes para comprovar que
 reenvios/leitura respeitam correções; isso não cria endpoints dessa sprint futura.
 
-## Validação
+## Validação da entrega inicial
 
 Validação local concluída em 29/10/2026:
 
@@ -343,5 +348,22 @@ repositório do colega nem se acionaram serviços reais de e-mail/pagamento.
 
 Os logs de encerramento da suíte exibiram avisos de conexões fechadas quando
 containers foram removidos; não houve falhas de teste ou de build.
-O CI remoto/Sonar e a revisão da PR permanecem para a publicação. Nenhum commit
-ou push foi realizado nesta etapa.
+
+## Validação das correções da PR #19
+
+Em 29/10/2026, após a revisão da PR #19:
+
+- Maven verify completo: **468 testes**, PostgreSQL **18.6**, zero falhas, erros
+  ou testes ignorados.
+- Maven verify focado: **62 testes**, PostgreSQL **16.15**, zero falhas, erros ou
+  testes ignorados.
+- URLs B2B simples e codificadas compartilham a mesma cota e preservam o login.
+- Observações/justificativas de 1000 caracteres e listas de 100 entradas são
+  aceitas; valores acima dos limites técnicos são rejeitados antes dos efeitos.
+- CPF/CNH duplicados em PATCH retornam 409 sem exposição de documentos, e a
+  atualização é revertida. PATCH de cadastro/status inexistente retorna 404.
+- A formatação textual de Create, Update e View de motorista não expõe os dados.
+- Os documentos continuam restritos a 11 dígitos ASCII e o QR é parâmetro JDBC.
+
+As consultas de contexto usam constantes de compilação e parâmetros JDBC.
+As mudanças não alteram tabelas, rotinas, permissões ou configurações do CI.
