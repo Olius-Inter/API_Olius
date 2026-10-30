@@ -33,7 +33,8 @@ public class CollectionReadRepository {
     public Page list(UUID owner,UUID driver,Query query) {
         String result=query.result()==null ? null : query.result().name();
         String state=query.recordStatus()==null ? null : query.recordStatus().name();
-        Timestamp from=timestamp(query.from()),until=timestamp(query.until());
+        Timestamp from=timestamp(query.from());
+        Timestamp until=timestamp(query.until());
         var args=new ArrayList<Object>(Arrays.asList(owner,owner,driver,driver,result,result,state,state,from,from,until,until));
         long count=Objects.requireNonNull(jdbc.queryForObject("SELECT count(*) FROM public.collection c"+FILTER,Long.class,args.toArray()));
         args.add(query.size());args.add((long)query.page()*query.size());
@@ -78,7 +79,8 @@ public class CollectionReadRepository {
                 """,(rs,row)->new Score(rs.getLong("points"),rs.getLong("successes"),rs.getBigDecimal("liters")),owner);
     }
     private View map(ResultSet rs,int row) throws SQLException {
-        var array=rs.getArray("failure_codes");List<String> codes;
+        var array=rs.getArray("failure_codes");
+        List<String> codes;
         try { codes=List.of((String[])array.getArray()); } finally { array.free(); }
         return new View(rs.getObject("id",UUID.class),rs.getObject("collection_request_id",UUID.class),
                 rs.getObject("establishment_id",UUID.class),rs.getObject("driver_id",UUID.class),

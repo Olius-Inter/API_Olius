@@ -41,10 +41,10 @@ public class CollectionOperationsService {
         return requireRequest(id,establishment);
     }
     @Transactional
-    public Detail record(UUID id,br.com.olius.olius_core_api.dto.CollectionContracts.Record input) {
+    public Detail registerCollection(UUID id,br.com.olius.olius_core_api.dto.CollectionContracts.Record input) {
         var actor=identify(input.access());requireRequest(id,actor.establishmentId());validateFacts(input);
         audit.driver(actor.driverId(),"Registro operacional de coleta B2B");
-        UUID collection=call(Operation.RECORD,()->operations.record(id,actor.driverId(),input));
+        UUID collection=call(Operation.RECORD,()->operations.registerCollection(id,actor.driverId(),input));
         return reads.uncheckedDetail(collection,actor.establishmentId());
     }
     @Transactional

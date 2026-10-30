@@ -10,6 +10,13 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class CollectionOperationsRepository {
     public record Identity(UUID driverId,String driverName,UUID establishmentId,String establishmentName) { }
+    private static final String CONTEXT_SOURCE="""
+                FROM public.collection_request r WHERE r.establishment_id=? AND r.status='APPROVED'
+                AND r.scheduled_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.collection c WHERE c.collection_request_id=r.id)
+                """;
+    private static final String CONTEXT_COUNT="SELECT count(*) "+CONTEXT_SOURCE;
+    private static final String CONTEXT_PAGE="SELECT r.id,r.estimated_volume_liters,r.scheduled_at,r.arrived_at,r.service_accepted_at "
+            +CONTEXT_SOURCE+" ORDER BY r.scheduled_at,r.id LIMIT ? OFFSET ?";
     private final JdbcTemplate jdbc;
     public CollectionOperationsRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
     public Optional<Identity> identify(DriverAccess access) {
@@ -26,13 +33,8 @@ public class CollectionOperationsRepository {
                     rs.getObject("user_id",UUID.class),rs.getString("name")),access.qrToken()).stream().findFirst();
     }
     public Context context(Identity identity,int page,int size) {
-        String filter="""
-                FROM public.collection_request r WHERE r.establishment_id=? AND r.status='APPROVED'
-                AND r.scheduled_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.collection c WHERE c.collection_request_id=r.id)
-                """;
-        long count=Objects.requireNonNull(jdbc.queryForObject("SELECT count(*) "+filter,Long.class,identity.establishmentId()));
-        var requests=jdbc.query("SELECT r.id,r.estimated_volume_liters,r.scheduled_at,r.arrived_at,r.service_accepted_at "+filter+
-                " ORDER BY r.scheduled_at,r.id LIMIT ? OFFSET ?",(rs,row)->new OperationalRequest(rs.getObject("id",UUID.class),
+        long count=Objects.requireNonNull(jdbc.queryForObject(CONTEXT_COUNT,Long.class,identity.establishmentId()));
+        var requests=jdbc.query(CONTEXT_PAGE,(rs,row)->new OperationalRequest(rs.getObject("id",UUID.class),
                     rs.getBigDecimal("estimated_volume_liters"),time(rs.getTimestamp("scheduled_at")),time(rs.getTimestamp("arrived_at")),
                     time(rs.getTimestamp("service_accepted_at"))),identity.establishmentId(),size,(long)page*size);
         var reasons=jdbc.query("""
@@ -47,7 +49,7 @@ public class CollectionOperationsRepository {
     public Instant accept(UUID request,UUID establishment) {
         return time(jdbc.queryForObject("SELECT public.accept_collection_service(?,?)",Timestamp.class,request,establishment));
     }
-    public UUID record(UUID request,UUID driver,br.com.olius.olius_core_api.dto.CollectionContracts.Record input) {
+    public UUID registerCollection(UUID request,UUID driver,br.com.olius.olius_core_api.dto.CollectionContracts.Record input) {
         // A mesma solicitação serializa reenvios da Core sem DML ou acesso aos logs.
         jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",Object.class,"olius:collection:"+request);
         Timestamp date=jdbc.queryForObject("""

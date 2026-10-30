@@ -12,11 +12,14 @@ public final class DriverContracts {
     private DriverContracts() { }
     @Schema(name="DriverCreate")
     public record Create(@NotBlank @Size(max=150) String name,
-            @NotNull @Pattern(regexp="[0-9]{11}") String cpf,
-            @NotNull @Pattern(regexp="[0-9]{11}") String cnh) { }
+            @NotNull @Pattern(regexp="\\d{11}") String cpf,
+            @NotNull @Pattern(regexp="\\d{11}") String cnh) {
+        @Override public String toString() { return "DriverCreate[redacted]"; }
+    }
     @Schema(name="DriverUpdate")
     public record Update(@Size(min=1,max=150) @Pattern(regexp="(?s).*\\S.*") String name,
-            @Pattern(regexp="[0-9]{11}") String cpf,@Pattern(regexp="[0-9]{11}") String cnh) {
+            @Pattern(regexp="\\d{11}") String cpf,@Pattern(regexp="\\d{11}") String cnh) {
+        @Override public String toString() { return "DriverUpdate[redacted]"; }
         @AssertTrue(message="Informe ao menos um campo")
         public boolean isNonEmpty() { return name!=null || cpf!=null || cnh!=null; }
     }
@@ -28,7 +31,9 @@ public final class DriverContracts {
     }
     @Schema(name="DriverView")
     public record View(UUID id,String name,String cpf,String cnh,UserStatus status,
-            Instant registrationDate,Instant updatedAt) { }
+            Instant registrationDate,Instant updatedAt) {
+        @Override public String toString() { return "DriverView[redacted]"; }
+    }
     @Schema(name="DriverPage")
     public record Page(List<View> items,int page,int size,long totalElements) {
         public Page { items=List.copyOf(items); }

@@ -12,10 +12,13 @@ import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.format.annotation.DateTimeFormat;
 
 public final class CollectionContracts {
+    // Limites técnicos de entrada: não alteram catálogo, pontos ou regras de franquia.
+    public static final int MAX_NOTE_LENGTH=1000;
+    public static final int MAX_FAILURE_REASON_ENTRIES=100;
     private CollectionContracts() { }
     @Schema(name="OperationalDriverAccess")
-    public record DriverAccess(@NotNull @Pattern(regexp="[0-9]{11}") String cpf,
-            @NotNull @Pattern(regexp="[0-9]{11}") String cnh,@NotBlank @Size(max=64) String qrToken) {
+    public record DriverAccess(@NotNull @Pattern(regexp="\\d{11}") String cpf,
+            @NotNull @Pattern(regexp="\\d{11}") String cnh,@NotBlank @Size(max=64) String qrToken) {
         @Override public String toString() { return "DriverAccess[redacted]"; }
     }
     @Schema(name="CollectionRecord")
@@ -23,10 +26,10 @@ public final class CollectionContracts {
             @NotNull @DecimalMin("0") @Digits(integer=6,fraction=2) BigDecimal collectedVolumeLiters,
             @NotNull @DecimalMin("0") @Digits(integer=6,fraction=2) BigDecimal presentedVolumeLiters,
             @NotNull OilCondition oilCondition,@NotNull Boolean hasCompromisingOccurrence,
-            @NotNull List<@NotBlank @Size(max=50) String> failureReasonCodes,
-            @Pattern(regexp="(?s).*\\S.*") String observation) { }
+            @NotNull @Size(max=MAX_FAILURE_REASON_ENTRIES) List<@NotBlank @Size(max=50) String> failureReasonCodes,
+            @Size(max=MAX_NOTE_LENGTH) @Pattern(regexp="(?s).*\\S.*") String observation) { }
     @Schema(name="AdministrativeFailedVisit")
-    public record FailedVisit(@NotNull AdministrativeFailureReason reasonCode,@NotBlank String justification) { }
+    public record FailedVisit(@NotNull AdministrativeFailureReason reasonCode,@NotBlank @Size(max=MAX_NOTE_LENGTH) String justification) { }
     @ParameterObject @Schema(name="CollectionQuery")
     public record Query(CollectionResult result,RecordStatus recordStatus,
             @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) Instant from,
