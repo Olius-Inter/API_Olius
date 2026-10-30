@@ -34,7 +34,7 @@ class OfficialReferenceDataIntegrationTest {
                 assertThat(rows.getLong(1)).isEqualTo(3);
                 assertThat(rows.getLong(2)).isEqualTo(3);
                 assertThat(rows.getLong(3)).isEqualTo(7);
-                assertThat(rows.getLong(4)).isEqualTo(3);
+                assertThat(rows.getLong(4)).isEqualTo(5);
             }
         }
     }

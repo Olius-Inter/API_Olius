@@ -35,7 +35,9 @@ BEGIN
             ('OIL_UNACCEPTABLE', 'Óleo em condição inadequada',
              'Condição inadequada do óleo registrada na coleta malsucedida.'),
             ('COMPROMISING_OCCURRENCE', 'Ocorrência que comprometeu a coleta',
-             'Ocorrência comprometedora registrada na coleta malsucedida.')
+             'Ocorrência comprometedora registrada na coleta malsucedida.'),
+            ('ESTABLISHMENT_CLOSED', 'Estabelecimento fechado', 'Visita sem atendimento: estabelecimento fechado, registrada por ADMIN após chegada do motorista.'),
+            ('NO_RESPONSIBLE_AVAILABLE', 'Responsável indisponível', 'Visita sem atendimento: ausência de responsável para confirmar o atendimento, registrada por ADMIN após chegada.')
     ), expected(table_name, record_key, attributes) AS (
         SELECT 'subscription_plan', name,
             jsonb_build_object('name', name, 'monthly_price', price,
@@ -73,7 +75,7 @@ BEGIN
     IF discrepancies IS NOT NULL THEN
         RAISE EXCEPTION 'Validação inicial: registro ausente, duplicado ou divergente em %.', discrepancies;
     END IF;
-    RAISE NOTICE 'Configuração oficial validada: 3 planos, 3 níveis, 7 tipos e 3 motivos (16 registros).';
+    RAISE NOTICE 'Configuração oficial validada: 3 planos, 3 níveis, 7 tipos e 5 motivos (18 registros).';
 END;
 $validate_reference_data$;
 COMMIT;

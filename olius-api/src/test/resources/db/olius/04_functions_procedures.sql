@@ -1348,7 +1348,7 @@ COMMENT ON PROCEDURE public.cancel_collection_request(UUID, UUID, public.cancell
 -- 7. Registro de coleta B2B e motivos de insucesso
 -- =============================================================================
 
-CREATE OR REPLACE PROCEDURE public.record_collection(
+CREATE OR REPLACE PROCEDURE public.record_collection_internal(
     IN p_collection_request_id UUID,
     IN p_driver_id UUID,
     IN p_collected_volume_liters NUMERIC,
@@ -1358,6 +1358,7 @@ CREATE OR REPLACE PROCEDURE public.record_collection(
     IN p_failure_reason_codes TEXT[],
     IN p_observation TEXT,
     IN p_collection_date TIMESTAMPTZ,
+    IN p_admin_id UUID,
     OUT p_collection_id UUID
 )
 LANGUAGE plpgsql AS $$
@@ -1395,7 +1396,22 @@ DECLARE
     v_found_count INTEGER;
     v_success_count BIGINT;
     v_points BIGINT;
+    v_original_admin UUID;
 BEGIN
+    IF p_admin_id IS NOT NULL THEN
+        PERFORM 1 FROM public.users WHERE id=p_admin_id AND user_type='ADMIN' AND status='ACTIVE' FOR SHARE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'ADMIN inexistente ou inativo.' USING ERRCODE='42501'; END IF;
+        IF p_collected_volume_liters IS DISTINCT FROM 0 OR p_presented_volume_liters IS DISTINCT FROM 0
+           OR p_oil_condition IS DISTINCT FROM 'NOT_ASSESSED'::public.oil_condition_t
+           OR p_has_compromising_occurrence IS DISTINCT FROM FALSE
+           OR p_observation IS NULL OR btrim(p_observation)=''
+           OR cardinality(v_codes)<>1 OR v_codes[1] IS NULL
+           OR v_codes[1] NOT IN ('ESTABLISHMENT_CLOSED','NO_RESPONSIBLE_AVAILABLE') THEN
+            RAISE EXCEPTION 'Visita administrativa exige motivo exclusivo, justificativa e ausência de avaliação/volume.' USING ERRCODE='22023';
+        END IF;
+    ELSIF v_codes && ARRAY['ESTABLISHMENT_CLOSED','NO_RESPONSIBLE_AVAILABLE']::TEXT[] THEN
+        RAISE EXCEPTION 'Motivo exclusivo do registro administrativo.' USING ERRCODE='42501';
+    END IF;
     -- Não usar ANY/COUNT antes de rejeitar NULLs: SQL usa lógica de três valores.
     IF EXISTS (SELECT 1 FROM unnest(v_codes) AS r(code) WHERE code IS NULL OR BTRIM(code) = '') THEN
         RAISE EXCEPTION 'A lista de motivos não pode conter elementos nulos ou vazios.' USING ERRCODE = c_err_parameter;
@@ -1456,6 +1472,14 @@ BEGIN
         IF v_original.result = c_successful THEN
             v_original_codes := ARRAY[]::TEXT[];
         END IF;
+        SELECT l.performed_by INTO v_original_admin FROM public.collection_log l
+        WHERE l.id=p_collection_id AND l.operation='INSERT' AND l.snapshot_kind='AFTER'
+        ORDER BY l.performed_at,l.log_id LIMIT 1;
+        IF (v_original_codes && ARRAY['ESTABLISHMENT_CLOSED','NO_RESPONSIBLE_AVAILABLE']::TEXT[])
+            IS DISTINCT FROM (p_admin_id IS NOT NULL)
+           OR (p_admin_id IS NOT NULL AND v_original_admin IS DISTINCT FROM p_admin_id) THEN
+            RAISE EXCEPTION 'Conflito de origem/autoria do registro original.' USING ERRCODE='22000';
+        END IF;
         IF v_original.driver_id IS DISTINCT FROM p_driver_id
            OR v_original.collected_volume_liters IS DISTINCT FROM p_collected_volume_liters
            OR v_original.presented_volume_liters IS DISTINCT FROM p_presented_volume_liters
@@ -1471,7 +1495,13 @@ BEGIN
     IF v_request.status <> c_request_approved OR v_request.scheduled_at IS NULL THEN
         RAISE EXCEPTION 'A solicitação precisa estar aprovada e agendada.' USING ERRCODE = c_err_state;
     END IF;
-    IF v_request.arrival_driver_id IS DISTINCT FROM p_driver_id
+    IF p_admin_id IS NOT NULL THEN
+        IF v_request.arrived_at IS NULL OR v_request.arrival_driver_id IS DISTINCT FROM p_driver_id
+           OR v_request.arrived_at IS DISTINCT FROM p_collection_date
+           OR v_request.service_accepted_at IS NOT NULL THEN
+            RAISE EXCEPTION 'Visita exige chegada do motorista e ausência de aceite.' USING ERRCODE='55000';
+        END IF;
+    ELSIF v_request.arrival_driver_id IS DISTINCT FROM p_driver_id
        OR v_request.service_accepted_at IS NULL
        OR v_request.service_accepted_by IS DISTINCT FROM v_request.establishment_id THEN
         RAISE EXCEPTION 'A coleta exige motorista designado e aceite do estabelecimento.' USING ERRCODE = c_err_authorization;
@@ -1485,7 +1515,7 @@ BEGIN
         ELSE c_unsuccessful END;
     IF v_result = c_unsuccessful THEN
         IF cardinality(v_codes) = 0 THEN RAISE EXCEPTION 'Toda coleta malsucedida deve registrar ao menos um motivo.' USING ERRCODE = c_err_constraint; END IF;
-        IF v_volume_out AND NOT (c_reason_volume = ANY(v_codes))
+        IF (p_admin_id IS NULL AND v_volume_out AND NOT (c_reason_volume = ANY(v_codes)))
            OR p_oil_condition = c_unacceptable AND NOT (c_reason_oil = ANY(v_codes))
            OR p_has_compromising_occurrence AND NOT (c_reason_occurrence = ANY(v_codes)) THEN
             RAISE EXCEPTION 'Os motivos devem corresponder aos fatos que tornaram a coleta malsucedida.' USING ERRCODE = c_err_constraint;
@@ -1541,8 +1571,64 @@ BEGIN
 END;
 $$;
 
-COMMENT ON PROCEDURE public.record_collection(UUID, UUID, NUMERIC, NUMERIC, public.oil_condition_t, BOOLEAN, TEXT[], TEXT, TIMESTAMPTZ) IS
-'Registra coleta B2B uma única vez, deriva resultado e razões de falha, reconstrói pontos e reconcilia certificados.';
+-- Núcleo compartilhado: nunca conceder EXECUTE à API nem a PUBLIC.
+REVOKE ALL ON PROCEDURE public.record_collection_internal(UUID, UUID, NUMERIC, NUMERIC, public.oil_condition_t, BOOLEAN, TEXT[], TEXT, TIMESTAMPTZ, UUID) FROM PUBLIC;
+
+CREATE OR REPLACE PROCEDURE public.record_collection(
+    IN p_collection_request_id UUID, IN p_driver_id UUID,
+    IN p_collected_volume_liters NUMERIC, IN p_presented_volume_liters NUMERIC,
+    IN p_oil_condition public.oil_condition_t, IN p_has_compromising_occurrence BOOLEAN,
+    IN p_failure_reason_codes TEXT[], IN p_observation TEXT, IN p_collection_date TIMESTAMPTZ,
+    OUT p_collection_id UUID
+) LANGUAGE plpgsql AS $$
+BEGIN
+    CALL public.record_collection_internal(p_collection_request_id,p_driver_id,
+        p_collected_volume_liters,p_presented_volume_liters,p_oil_condition,
+        p_has_compromising_occurrence,p_failure_reason_codes,p_observation,p_collection_date,
+        NULL,p_collection_id);
+END $$;
+COMMENT ON PROCEDURE public.record_collection(UUID, UUID, NUMERIC, NUMERIC, public.oil_condition_t, BOOLEAN, TEXT[], TEXT, TIMESTAMPTZ)
+IS 'Fluxo normal B2B: preserva assinatura, exige aceite e utiliza o núcleo oficial de registro/pontuação.';
+
+-- A data do fato é a chegada; created_at e performed_at identificam o lançamento.
+CREATE OR REPLACE FUNCTION public.record_failed_collection_visit(
+    p_request_id UUID, p_admin_id UUID, p_reason_code TEXT, p_justification TEXT
+) RETURNS UUID LANGUAGE plpgsql SECURITY INVOKER
+SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE
+    r public.collection_request%ROWTYPE; collection_id UUID;
+    previous_actor TEXT:=current_setting('app.audit_actor',true);
+    previous_user TEXT:=current_setting('app.current_user_id',true);
+    previous_driver TEXT:=current_setting('app.operational_driver_id',true);
+    previous_reason TEXT:=current_setting('app.audit_reason',true);
+BEGIN
+    IF p_admin_id IS NULL OR p_reason_code IS NULL
+       OR p_reason_code NOT IN ('ESTABLISHMENT_CLOSED','NO_RESPONSIBLE_AVAILABLE')
+       OR p_justification IS NULL OR btrim(p_justification)='' THEN
+        RAISE EXCEPTION 'ADMIN, motivo permitido e justificativa são obrigatórios.' USING ERRCODE='22023';
+    END IF;
+    -- A validação e os bloqueios definitivos pertencem ao núcleo compartilhado.
+    SELECT * INTO r FROM public.collection_request WHERE id=p_request_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Solicitação inexistente.' USING ERRCODE='P0002'; END IF;
+    PERFORM set_config('app.audit_actor','USER',true);
+    PERFORM set_config('app.current_user_id',p_admin_id::TEXT,true);
+    PERFORM set_config('app.operational_driver_id','',true);
+    PERFORM set_config('app.audit_reason',btrim(p_justification),true);
+    CALL public.record_collection_internal(p_request_id,r.arrival_driver_id,0,0,'NOT_ASSESSED',
+        FALSE,ARRAY[p_reason_code],btrim(p_justification),r.arrived_at,p_admin_id,collection_id);
+    PERFORM set_config('app.audit_actor',coalesce(previous_actor,''),true);
+    PERFORM set_config('app.current_user_id',coalesce(previous_user,''),true);
+    PERFORM set_config('app.operational_driver_id',coalesce(previous_driver,''),true);
+    PERFORM set_config('app.audit_reason',coalesce(previous_reason,''),true);
+    RETURN collection_id;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('app.audit_actor',coalesce(previous_actor,''),true);
+    PERFORM set_config('app.current_user_id',coalesce(previous_user,''),true);
+    PERFORM set_config('app.operational_driver_id',coalesce(previous_driver,''),true);
+    PERFORM set_config('app.audit_reason',coalesce(previous_reason,''),true);
+    RAISE;
+END $$;
+REVOKE ALL ON FUNCTION public.record_failed_collection_visit(UUID,UUID,TEXT,TEXT) FROM PUBLIC;
 
 -- =============================================================================
 -- 8. Registro idempotente de entrega B2C em PEV
@@ -1746,6 +1832,19 @@ BEGIN
     END IF;
     SELECT cr.* INTO v_request FROM public.collection_request cr WHERE cr.id = v_collection.collection_request_id;
     IF p_record_status = c_recorded THEN
+        IF v_request.service_accepted_at IS NULL AND (
+            p_collected_volume_liters IS DISTINCT FROM 0 OR p_presented_volume_liters IS DISTINCT FROM 0
+            OR p_oil_condition IS DISTINCT FROM c_not_assessed
+            OR p_has_compromising_occurrence IS DISTINCT FROM FALSE
+            OR p_observation IS NULL OR btrim(p_observation)=''
+            OR cardinality(v_codes)<>1 OR v_codes[1] IS NULL
+            OR v_codes[1] NOT IN ('ESTABLISHMENT_CLOSED','NO_RESPONSIBLE_AVAILABLE')) THEN
+            RAISE EXCEPTION 'Sem aceite, correção deve preservar visita sem atendimento.' USING ERRCODE='23514';
+        END IF;
+        IF v_request.service_accepted_at IS NOT NULL
+           AND v_codes && ARRAY['ESTABLISHMENT_CLOSED','NO_RESPONSIBLE_AVAILABLE']::TEXT[] THEN
+            RAISE EXCEPTION 'Motivo de ausência de atendimento incompatível com aceite.' USING ERRCODE='23514';
+        END IF;
         IF p_collected_volume_liters IS NULL OR p_collected_volume_liters < 0
            OR p_collected_volume_liters IN ('NaN'::NUMERIC, 'Infinity'::NUMERIC, '-Infinity'::NUMERIC)
            OR p_collected_volume_liters <> ROUND(p_collected_volume_liters, 2) OR p_presented_volume_liters IS NULL
@@ -1767,7 +1866,7 @@ BEGIN
         IF v_result = c_unsuccessful AND cardinality(v_codes) = 0 THEN
             RAISE EXCEPTION 'Toda coleta malsucedida deve registrar ao menos um motivo.' USING ERRCODE = c_err_constraint;
         END IF;
-        IF (v_volume_out AND NOT (c_reason_volume = ANY(v_codes)))
+        IF (v_request.service_accepted_at IS NOT NULL AND v_volume_out AND NOT (c_reason_volume = ANY(v_codes)))
            OR (p_oil_condition = c_unacceptable AND NOT (c_reason_oil = ANY(v_codes)))
            OR (p_has_compromising_occurrence AND NOT (c_reason_occurrence = ANY(v_codes))) THEN
             RAISE EXCEPTION 'Os motivos devem corresponder aos fatos da coleta corrigida.' USING ERRCODE = c_err_constraint;

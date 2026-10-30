@@ -16,7 +16,8 @@ LOCK TABLE public.subscription_plan, public.certificate_level,
 
 DO $reference_data$
 DECLARE
-    catalogs CONSTANT JSONB := $catalogs${
+    catalogs CONSTANT JSONB := $catalogs$
+{
     "subscription_plan": [
         {
             "name": "Plano Básico",
@@ -95,9 +96,22 @@ DECLARE
             "name": "Ocorrência que comprometeu a coleta",
             "description": "Ocorrência comprometedora registrada na coleta malsucedida.",
             "status": "ACTIVE"
+        },
+        {
+            "code": "ESTABLISHMENT_CLOSED",
+            "name": "Estabelecimento fechado",
+            "description": "Visita sem atendimento: estabelecimento fechado, registrada por ADMIN após chegada do motorista.",
+            "status": "ACTIVE"
+        },
+        {
+            "code": "NO_RESPONSIBLE_AVAILABLE",
+            "name": "Responsável indisponível",
+            "description": "Visita sem atendimento: ausência de responsável para confirmar o atendimento, registrada por ADMIN após chegada.",
+            "status": "ACTIVE"
         }
     ]
-}$catalogs$::JSONB;
+}
+$catalogs$::JSONB;
     catalog RECORD;
     item JSONB;
     key_column TEXT;

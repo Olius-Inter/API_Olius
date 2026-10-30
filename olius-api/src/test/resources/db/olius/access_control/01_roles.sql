@@ -491,7 +491,7 @@ DECLARE name text; r record; matches integer; kind text; internal boolean;
 BEGIN
     FOREACH name IN ARRAY ARRAY['rebuild_user_points','reconcile_establishment_certificates',
         'apply_verified_payment','create_collection_request','schedule_collection_request',
-        'cancel_collection_request','record_collection','record_pev_delivery','correct_collection','correct_pev_delivery',
+        'cancel_collection_request','record_collection','record_collection_internal','record_failed_collection_visit','record_pev_delivery','correct_collection','correct_pev_delivery',
         'fn_olius_audit_trigger','fn_olius_sync_establishment_is_pev',
         'record_collection_arrival','accept_collection_service','reject_collection_request','set_billing_charge_external_status'] LOOP
         SELECT count(*) INTO matches FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
@@ -507,12 +507,12 @@ BEGIN
             RAISE EXCEPTION 'Rotina % tem EXECUTE externo: revisar antes de elevar privilégios.',name;
         END IF;
         kind:=CASE WHEN r.prokind='p' THEN 'PROCEDURE' ELSE 'FUNCTION' END;
-        internal:=name IN ('rebuild_user_points','reconcile_establishment_certificates');
+        internal:=name IN ('rebuild_user_points','reconcile_establishment_certificates','record_collection_internal');
         EXECUTE format('ALTER %s public.%I(%s) OWNER TO olius_business_owner',kind,name,r.args);
         EXECUTE format('ALTER %s public.%I(%s) SECURITY %s',kind,name,r.args,CASE WHEN internal THEN 'INVOKER' ELSE 'DEFINER' END);
         EXECUTE format('ALTER %s public.%I(%s) SET search_path = pg_catalog, public, pg_temp',kind,name,r.args);
         EXECUTE format('REVOKE ALL ON %s public.%I(%s) FROM PUBLIC, olius_api, olius_owner RESTRICT',kind,name,r.args);
-        IF name NOT IN ('fn_olius_audit_trigger','fn_olius_sync_establishment_is_pev') THEN
+        IF name NOT IN ('fn_olius_audit_trigger','fn_olius_sync_establishment_is_pev','record_collection_internal') THEN
             EXECUTE format('GRANT EXECUTE ON %s public.%I(%s) TO olius_owner',kind,name,r.args);
             IF NOT internal THEN EXECUTE format('GRANT EXECUTE ON %s public.%I(%s) TO olius_api',kind,name,r.args); END IF;
         END IF;
