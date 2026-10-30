@@ -16,7 +16,8 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/*/login"),
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/*/refresh"),
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/registrations/*"),
-        PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/admin-invitations/acceptance"));
+        PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/auth/admin-invitations/acceptance"),
+        PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/api/v1/operations/b2b/**"));
     private final AuthRateLimiter limiter;
     private final ApiProblemFactory factory;
     private final ObjectMapper mapper;
@@ -27,7 +28,7 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
         throws IOException,ServletException {
         boolean limited=LIMITED.matches(request);
         // Não confiar em X-Forwarded-For fornecido diretamente pelo cliente.
-        if(limited && !limiter.allow(request.getRemoteAddr())) {
+        if(limited && !limiter.allow((request.getRequestURI().startsWith("/api/v1/operations/b2b/") ? "b2b:" : "auth:")+request.getRemoteAddr())) {
             response.setStatus(429); response.setHeader("Retry-After","60");
             response.setHeader("X-Request-Id",factory.traceId(request));
             response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);

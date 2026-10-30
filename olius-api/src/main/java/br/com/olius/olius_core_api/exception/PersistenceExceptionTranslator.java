@@ -22,7 +22,9 @@ public class PersistenceExceptionTranslator {
         "establishment.establishment_cnpj_key", ApiErrorCode.REGISTRATION_CONFLICT,
         "telephone.uq_telephone_user_number", ApiErrorCode.DUPLICATE_TELEPHONE,
         "pev.pev_citizen_id_key", ApiErrorCode.PEV_ALREADY_EXISTS,
-        "pev.pev_establishment_id_key", ApiErrorCode.PEV_ALREADY_EXISTS
+        "pev.pev_establishment_id_key", ApiErrorCode.PEV_ALREADY_EXISTS,
+        "driver.driver_cpf_key", ApiErrorCode.RESOURCE_CONFLICT,
+        "driver.driver_cnh_key", ApiErrorCode.RESOURCE_CONFLICT
     );
 
     /**

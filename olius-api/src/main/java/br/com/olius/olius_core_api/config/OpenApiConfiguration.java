@@ -19,7 +19,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro, identidade, PEV, pagamentos, solicitações e agenda B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade, PEV, pagamentos, solicitações, agenda e coletas B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -38,7 +38,12 @@ public class OpenApiConfiguration {
                 documentResponses(operation);
                 if (!path.startsWith("/api/v1/collection-requests")
                         && !path.startsWith("/api/v1/admin/collection-requests")
-                        && !path.startsWith("/api/v1/billing/cycles/"))
+                        && !path.startsWith("/api/v1/billing/cycles/")
+                        && !path.startsWith("/api/v1/admin/drivers")
+                        && !path.startsWith("/api/v1/operations/b2b/")
+                        && !path.startsWith("/api/v1/collections")
+                        && !path.startsWith("/api/v1/admin/collections")
+                        && !path.equals("/api/v1/establishments/me/score"))
                     operation.setDescription(description(path, method));
                 documentPevResponse(path, method, operation);
             }));
@@ -66,7 +71,8 @@ public class OpenApiConfiguration {
     }
 
     private boolean publicPath(String path, PathItem.HttpMethod method) {
-        return (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET)
+        return (path.startsWith("/api/v1/operations/b2b/") && method==PathItem.HttpMethod.POST)
+            || (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET)
             || (path.equals("/api/v1/subscription-plans") && method == PathItem.HttpMethod.GET)
             || (path.equals("/api/v1/webhooks/stripe") && method == PathItem.HttpMethod.POST)
             || path.startsWith("/api/v1/auth/registrations/")
