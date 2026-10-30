@@ -1,6 +1,6 @@
 {
   "source": "DB_Segundo/PostgreSQL",
-  "reviewed_at": "2026-10-28",
+  "reviewed_at": "2026-10-29",
   "files": [
     {
       "file": "01_structure.sql",
@@ -19,8 +19,8 @@
     },
     {
       "file": "04_functions_procedures.sql",
-      "sha256": "cdca9fd7280bd74b381a063846f06bc26022162ec70496db0743187b2e79d3d3",
-      "source_sha256": "884e814c1918d972b03349dd8c56e174ab8f73cfe3834d5faa94c734e3092cd1"
+      "sha256": "80908e323c9349981d1eb6cf186278f7cd851638742c5409109e367f8cd2a986",
+      "source_sha256": "4c3f2670204cc59395457968d2766eb6e37b542c504f3672d9e87afddae15043"
     },
     {
       "file": "05_triggers.sql",
@@ -44,8 +44,8 @@
     },
     {
       "file": "access_control/01_roles.sql",
-      "sha256": "0948242beccd6cecfda0051dddd2c57b36ad03fa24870fd2e5dded1e80e76891",
-      "source_sha256": "73f3d6336eebcabae10801db0cb7f716752b5b941c8eaa5ac89fa5b51be5f469"
+      "sha256": "ec0842c2a1141fff8579b0a4919e3d3cea62cac9fec8cf063e542f66384fcfc4",
+      "source_sha256": "381e0910441f0ddc614221bd46e6aed909f4494849fda72b83c234bfe058522c"
     },
     {
       "file": "data_catalog/01_structure.sql",
@@ -64,8 +64,8 @@
     },
     {
       "file": "data_catalog/04_load.sql",
-      "sha256": "e0c7c60a69484acfb3164fdf0e0ead7019639a64264accbbefaec8de23490d72",
-      "source_sha256": "d3f86a07441424b86f681406b58d126285af38339aa4b1f63416efc9fc4b3489"
+      "sha256": "7dc0031d7f40cf0dcab456ef13d72811b5e5c54d47d57395cab3c5a312182455",
+      "source_sha256": "dc7deb0968cdc130176cb1fe6652302478392363dca2709d4d9bc0bcede7d8e2"
     },
     {
       "file": "data_catalog/05_validate.sql",
@@ -74,19 +74,20 @@
     },
     {
       "file": "initial_data/01_reference_data.sql",
-      "sha256": "ebca027219c30cf746046c9f1b749f82fd924d8d58aa3154a87fe9c703d56f74",
-      "source_sha256": "c91d071a152b592d13c243d817fb21fa50cb264dfb92d0cba808c8de6a8a36a5"
+      "sha256": "0413afc38bb46affa2a928ad8548be0f45483ebd2100fb4b4d023c593a25135a",
+      "source_sha256": "a462a5462a12558f584c4033d40f45e199aa1db9b6ba9363fb8f549b9b5c0a25"
     },
     {
       "file": "initial_data/02_validate.sql",
-      "sha256": "591a65b539eb67b7c8c775298b9eb40d3582b8eb599923a03e9f80c8ad048faf",
-      "source_sha256": "d544f3a846ce01f07a7771df7ea8c97488fc83324213b7abfed657df6f27e860"
+      "sha256": "c0d6107a1930c39d9d64b485e5ae795801be4b7c3110eb45f3263190feb011ad",
+      "source_sha256": "e1a9c7e225a91a0155df8a32b99ebfad4a868bccfa10433754922e0e58fc6210"
     }
   ],
   "notes": [
     "Snapshot completo de instalação e contratos administrativos; funções de autenticação preservam a restauração do contexto de auditoria.",
     "initial_data é recurso de teste explícito: não é carregado automaticamente pela fixture nem em produção.",
-    "Banco Aiven identificado como PostgreSQL 18.6; matriz configurada para validar PostgreSQL 16.15 e 18.6."
+    "Banco Aiven identificado como PostgreSQL 18.6; matriz configurada para validar PostgreSQL 16.15 e 18.6.",
+    "Sprint 9: visita sem atendimento por ADMIN; assinatura normal preservada, núcleo privado e migração revisados. Snapshot não executa migração no ambiente instalado."
   ],
   "hash_format": "sha256 usa bytes UTF-8 com finais de linha LF; source_sha256 registra os bytes do arquivo oficial revisado."
 }

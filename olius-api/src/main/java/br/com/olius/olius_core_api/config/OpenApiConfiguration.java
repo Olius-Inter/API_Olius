@@ -12,6 +12,7 @@ import org.springframework.context.annotation.*;
 
 @Configuration
 public class OpenApiConfiguration {
+    private static final String PEVS_PATH = "/api/v1/pevs";
     private static final String BEARER = "bearer";
     private static final String CSRF = "csrf";
     private static final String REFRESH_COOKIE = "refreshCookie";
@@ -19,7 +20,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro, identidade, PEV, pagamentos, solicitações e agenda B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade, PEV, pagamentos, solicitações, agenda e coletas B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -38,7 +39,12 @@ public class OpenApiConfiguration {
                 documentResponses(operation);
                 if (!path.startsWith("/api/v1/collection-requests")
                         && !path.startsWith("/api/v1/admin/collection-requests")
-                        && !path.startsWith("/api/v1/billing/cycles/"))
+                        && !path.startsWith("/api/v1/billing/cycles/")
+                        && !path.startsWith("/api/v1/admin/drivers")
+                        && !path.startsWith("/api/v1/operations/b2b/")
+                        && !path.startsWith("/api/v1/collections")
+                        && !path.startsWith("/api/v1/admin/collections")
+                        && !path.equals("/api/v1/establishments/me/score"))
                     operation.setDescription(description(path, method));
                 documentPevResponse(path, method, operation);
             }));
@@ -66,7 +72,8 @@ public class OpenApiConfiguration {
     }
 
     private boolean publicPath(String path, PathItem.HttpMethod method) {
-        return (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET)
+        return (path.startsWith("/api/v1/operations/b2b/") && method==PathItem.HttpMethod.POST)
+            || (path.equals(PEVS_PATH) && method == PathItem.HttpMethod.GET)
             || (path.equals("/api/v1/subscription-plans") && method == PathItem.HttpMethod.GET)
             || (path.equals("/api/v1/webhooks/stripe") && method == PathItem.HttpMethod.POST)
             || path.startsWith("/api/v1/auth/registrations/")
@@ -105,11 +112,11 @@ public class OpenApiConfiguration {
             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiProblem"))));
     }
     private void documentPevResponse(String path, PathItem.HttpMethod method, Operation operation) {
-        if (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.POST) {
+        if (path.equals(PEVS_PATH) && method == PathItem.HttpMethod.POST) {
             operation.setSummary("Solicitar PEV");
             operation.getResponses().computeIfAbsent("201", ignored -> new ApiResponse())
                 .setDescription("PEV PENDING criado; Location aponta para /api/v1/pevs/me.");
-        } else if (path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET) {
+        } else if (path.equals(PEVS_PATH) && method == PathItem.HttpMethod.GET) {
             operation.setSummary("Listar PEVs aprovados");
             operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
                 .setDescription("Página pública com endereço do ponto, sem dados pessoais do responsável.");
@@ -139,9 +146,9 @@ public class OpenApiConfiguration {
         if(path.equals("/api/v1/webhooks/stripe")) return "Entrada exclusiva de eventos Stripe snapshot em sandbox. Não usa JWT; exige Stripe-Signature válida sobre o corpo original. Evento válido é persistido antes do 204. Processamento financeiro ocorre depois, com consulta ao provedor e deduplicação. Não é um endpoint de confirmação manual pelo frontend.";
         if(path.equals("/api/v1/billing/initial-checkouts")) return "Estabelecimento ativo solicita contratação inicial. Corpo contém somente planId; header Idempotency-Key UUID obrigatório, preservado em reenvios. Preço/franquias vêm do PostgreSQL. Retorna a página Stripe, sem ativar assinatura. Reenvio com mesma chave/plano reutiliza a cobrança; conflito de estado/payload retorna 409. Integração desabilitada ou falha externa retorna 503.";
         if(path.equals("/api/v1/subscription-plans")) return "Consulta pública de planos ativos, ordenados por preço e ID. Preço em BRL; litros e coletas são limites por ciclo mensal. Catálogo vazio retorna []. Não cria cobrança nem concede benefícios; contratação revalida a oferta no servidor.";
-        if(path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.POST)
+        if(path.equals(PEVS_PATH) && method == PathItem.HttpMethod.POST)
             return "Cidadão ou estabelecimento ativo solicita um PEV com endereço próprio. O responsável vem do Bearer; status, aprovação e responsável não são aceitos no corpo. Solicitação duplicada retorna 409.";
-        if(path.equals("/api/v1/pevs") && method == PathItem.HttpMethod.GET)
+        if(path.equals(PEVS_PATH) && method == PathItem.HttpMethod.GET)
             return "Consulta pública de PEVs APPROVED, ordenados por createdAt ASC e id ASC. page começa em 0; size padrão 20 e máximo 100. Deslocamento acima de Integer.MAX_VALUE retorna 400.";
         if(path.equals("/api/v1/pevs/me") && method == PathItem.HttpMethod.GET)
             return "Cidadão ou estabelecimento ativo consulta apenas o próprio PEV. Retorna 404 quando ainda não existe solicitação.";
