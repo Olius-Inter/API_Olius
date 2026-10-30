@@ -11,6 +11,18 @@ class OpenApiConfigurationTest {
     private final OpenApiConfiguration configuration = new OpenApiConfiguration();
 
     @Test
+    void qrIdentificationRequiresBearerAndDocumentsMinimalResponse() {
+        var api = configuration.identityOpenApi();
+        var identify = new Operation();
+        api.setPaths(new Paths().addPathItem("/api/v1/qr/resolutions", new PathItem().post(identify)));
+        configuration.identityContracts().customise(api);
+        assertThat(identify.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(identify.getSummary()).isEqualTo("Identificar cidadão por QR");
+        assertThat(identify.getDescription()).contains("token único", "ID e nome", "não altera");
+        assertThat(identify.getResponses()).containsKeys("200", "400", "401", "403", "404");
+    }
+
+    @Test
     void customizerSupportsAnEmptyDocument() {
         var api = new OpenAPI();
         configuration.identityContracts().customise(api);
