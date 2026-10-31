@@ -20,7 +20,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro, identidade, PEV, entregas e pontos B2C, pagamentos, solicitações, agenda e coletas B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade, PEV, entregas e pontos B2C, pagamentos, solicitações, agenda, coletas B2B, certificados e consultas ambientais. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -37,18 +37,20 @@ public class OpenApiConfiguration {
             api.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, operation) -> {
                 documentSecurity(path, method, operation);
                 documentResponses(operation);
-                if (!path.startsWith("/api/v1/collection-requests")
-                        && !path.startsWith("/api/v1/admin/collection-requests")
-                        && !path.startsWith("/api/v1/billing/cycles/")
-                        && !path.startsWith("/api/v1/admin/drivers")
-                        && !path.startsWith("/api/v1/operations/b2b/")
-                        && !path.startsWith("/api/v1/collections")
-                        && !path.startsWith("/api/v1/admin/collections")
-                        && !path.equals("/api/v1/establishments/me/score"))
+                if (!preservesDescription(path))
                     operation.setDescription(description(path, method));
                 documentPevResponse(path, method, operation);
             }));
         };
+    }
+
+    private static boolean preservesDescription(String path) {
+        return List.of("/api/v1/collection-requests", "/api/v1/admin/collection-requests",
+                "/api/v1/billing/cycles/", "/api/v1/admin/drivers", "/api/v1/operations/b2b/",
+                "/api/v1/collections", "/api/v1/admin/collections", "/api/v1/certificate",
+                "/api/v1/admin/certificates").stream().anyMatch(path::startsWith)
+            || path.equals("/api/v1/establishments/me/score")
+            || path.endsWith("/certificate-progress") || path.endsWith("/environmental-summary");
     }
 
     private void documentProblems(Components components) {

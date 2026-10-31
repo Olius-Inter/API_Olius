@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -87,7 +88,7 @@ public class DeliveryService {
         return view;
     }
 
-    @Transactional(readOnly=true)
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public PevPage listForPev(UUID pevId,UUID validator,UserType actorType,int page,int size) {
         requireValidatorAndPev(pevId,validator,actorType);
         long offset=(long)page*size;
