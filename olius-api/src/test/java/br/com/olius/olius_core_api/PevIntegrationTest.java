@@ -138,6 +138,89 @@ class PevIntegrationTest {
             "oilVolumeLiters",new java.math.BigDecimal(volume),"deliveryDate",date));
     }
 
+    @Test void listsOnlyOwnPevDeliveriesWithStablePagesAndMinimalCitizenData() throws Exception {
+        var owner=citizen();
+        var otherOwner=citizen();
+        var beneficiary=citizen();
+        String access=login(owner.email());
+        String otherAccess=login(otherOwner.email());
+        UUID pev=approvedDeliveryPev(owner,access);
+        UUID otherPev=approvedDeliveryPev(otherOwner,otherAccess);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        String first=recordForTest(pev,access,qr,"1.00",date.minusSeconds(60));
+        String second=recordForTest(pev,access,qr,"2.00",date);
+        recordForTest(otherPev,otherAccess,qr,"3.00",date.plusSeconds(60));
+        String endpoint="/api/v1/pevs/"+pev+"/deliveries";
+        mvc.perform(get(endpoint)).andExpect(status().isUnauthorized());
+        mvc.perform(get(endpoint).header("Authorization","Bearer "+otherAccess))
+            .andExpect(status().isForbidden());
+        mvc.perform(get(endpoint).header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(20))
+            .andExpect(jsonPath("$.totalElements").value(2))
+            .andExpect(jsonPath("$.items.length()").value(2))
+            .andExpect(jsonPath("$.items[0].id").value(second))
+            .andExpect(jsonPath("$.items[0].citizenId").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.items[0].citizenName").value("Cidadão"))
+            .andExpect(jsonPath("$.items[0].email").doesNotExist())
+            .andExpect(jsonPath("$.items[0].cpf").doesNotExist());
+        mvc.perform(get(endpoint).param("page","0").param("size","1")
+            .header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(second))
+            .andExpect(jsonPath("$.totalElements").value(2));
+        mvc.perform(get(endpoint).param("page","1").param("size","1")
+            .header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(first))
+            .andExpect(jsonPath("$.totalElements").value(2));
+        for(String query : List.of("?page=", "?size=", "?page=2147483647&size=20"))
+            mvc.perform(get(endpoint+query).header("Authorization","Bearer "+access))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test void citizenPointsShowOnlyOwnCurrentDeliveryMovements() throws Exception {
+        var owner=citizen();
+        var beneficiary=citizen();
+        var otherCitizen=citizen();
+        String access=login(owner.email());
+        String beneficiaryAccess=login(beneficiary.email());
+        String otherAccess=login(otherCitizen.email());
+        UUID pev=approvedDeliveryPev(owner,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        String first=recordForTest(pev,access,qr,"3.70",date.minusSeconds(60));
+        String second=recordForTest(pev,access,qr,"1.50",date);
+        String endpoint="/api/v1/users/me/points";
+        mvc.perform(get(endpoint)).andExpect(status().isUnauthorized());
+        mvc.perform(get(endpoint).header("Authorization","Bearer "+beneficiaryAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(4))
+            .andExpect(jsonPath("$.totalElements").value(2))
+            .andExpect(jsonPath("$.movements.length()").value(2))
+            .andExpect(jsonPath("$.movements[0].deliveryId").value(second))
+            .andExpect(jsonPath("$.movements[0].points").value(1))
+            .andExpect(jsonPath("$.movements[1].deliveryId").value(first))
+            .andExpect(jsonPath("$.movements[1].points").value(3));
+        mvc.perform(get(endpoint).param("page","1").param("size","1")
+            .header("Authorization","Bearer "+beneficiaryAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(4))
+            .andExpect(jsonPath("$.movements.length()").value(1))
+            .andExpect(jsonPath("$.movements[0].deliveryId").value(first));
+        mvc.perform(get(endpoint).header("Authorization","Bearer "+otherAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(0))
+            .andExpect(jsonPath("$.movements.length()").value(0));
+    }
+
+    private String recordForTest(UUID pev,String access,String qr,String volume,java.time.Instant date)
+            throws Exception {
+        var response=mvc.perform(post("/api/v1/pevs/{id}/deliveries",pev)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(UUID.randomUUID(),qr,volume,date)))
+            .andExpect(status().isCreated()).andReturn();
+        return json.readTree(response.getResponse().getContentAsString()).get("id").asText();
+    }
+
     @Test void recoversConfirmedDeliveryWithoutQrAfterPevInactivationAndRejectsChangedFacts() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
