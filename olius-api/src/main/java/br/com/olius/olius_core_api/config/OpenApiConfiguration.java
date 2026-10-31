@@ -164,6 +164,12 @@ public class OpenApiConfiguration {
     }
 
     private String description(String path, PathItem.HttpMethod method) {
+        if(path.equals("/api/v1/admin/deliveries/{id}/corrections"))
+            return "ADMIN ativo corrige RECORDED, anula RECORDED ou restaura ANNULLED. expectedRevision positivo e reason de até 1000 caracteres obrigatórios. ANNULLED exige volume e data ausentes ou nulos e preserva os valores físicos. RECORDED exige volume de 0.01 a 999.99 litros com até duas casas e data não futura nem posterior à criação original. Retorna 200 com delivery, balanceAfter e calculatedAt atualizados. Auditoria, revisão e recálculo são atômicos. Revisão antiga ou estado incompatível retorna 409, sem repetição automática; dados incompatíveis com a criação original retornam 422.";
+        if(path.equals("/api/v1/admin/deliveries"))
+            return "Somente ADMIN ativo. Lista entregas registradas e anuladas com estado, revisão e pontos vigentes. page=0 e size=20 por padrão, máximo 100; ordem createdAt DESC, id DESC. Parâmetros vazios, inválidos ou deslocamento acima de Integer.MAX_VALUE retornam 400. Página além do total retorna items vazio e conserva totalElements.";
+        if(path.equals("/api/v1/admin/deliveries/{id}"))
+            return "Somente ADMIN ativo. Retorna delivery com estado e revisão vigentes, balanceAfter e calculatedAt do cálculo atual. Entrega inexistente retorna 404. Não expõe QR, documentos ou contato do cidadão.";
         if(path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.POST)
             return "Responsável ativo do PEV registra volume aceito de 0.01 a 999.99 litros e data física não futura. O QR identifica cidadão ativo somente na criação. No reenvio, qrToken é ignorado e o cidadão original é reutilizado. idempotencyKey UUID vincula reenvios ao validador; 201 cria com Location consultável, 200 recupera sem duplicar pontos. PEV, volume ou data originais divergentes retornam 409.";
         if(path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.GET)

@@ -258,6 +258,185 @@ class PevIntegrationTest {
         return json.readTree(response.getResponse().getContentAsString()).get("id").asText();
     }
 
+    @Test void adminCorrectsRecordedDeliveryAndRebuildsPointsWithAudit() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String validatorAccess=login(validator.email());
+        UUID pev=approvedDeliveryPev(validator,validatorAccess);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var originalDate=java.time.Instant.now().minusSeconds(7200);
+        UUID id=UUID.fromString(recordForTest(pev,validatorAccess,qr,"3.70",originalDate));
+        var adminAccount=activeAdmin();
+        var correctedDate=originalDate.minusSeconds(3600);
+        String route="/api/v1/admin/deliveries/"+id+"/corrections";
+
+        mvc.perform(post(route).header("Authorization","Bearer "+adminAccount.access())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(correction(1,"RECORDED","5.25",correctedDate,"  Volume conferido  ")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.delivery.id").value(id.toString()))
+            .andExpect(jsonPath("$.delivery.oilVolumeLiters").value(5.25))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(5))
+            .andExpect(jsonPath("$.delivery.revision").value(2))
+            .andExpect(jsonPath("$.balanceAfter").value(5));
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id()))
+            .isEqualTo(5);
+        assertThat(admin().queryForObject("SELECT correction_reason FROM delivery_pev WHERE id=?",
+            String.class,id)).isEqualTo("Volume conferido");
+        assertThat(admin().queryForObject("SELECT corrected_by FROM delivery_pev WHERE id=?",
+            UUID.class,id)).isEqualTo(adminAccount.id());
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev_log WHERE id=? AND revision=2 AND snapshot_kind='AFTER' AND performed_by=?",
+            Long.class,id,adminAccount.id())).isEqualTo(1);
+        assertThat(admin().queryForObject("SELECT count(*) FROM point_calculation WHERE delivery_pev_id=? AND is_current",
+            Long.class,id)).isEqualTo(1);
+    }
+
+    @Test void correctionRejectsOldRevisionInvalidFactsAndUnauthorizedCallers() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String validatorAccess=login(validator.email());
+        UUID pev=approvedDeliveryPev(validator,validatorAccess);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var originalDate=java.time.Instant.now().minusSeconds(7200);
+        UUID id=UUID.fromString(recordForTest(pev,validatorAccess,qr,"3.70",originalDate));
+        var adminAccount=activeAdmin();
+        var createdAt=admin().queryForObject("SELECT created_at FROM delivery_pev WHERE id=?",
+            java.sql.Timestamp.class,id).toInstant();
+        String route="/api/v1/admin/deliveries/"+id+"/corrections";
+        String valid=correction(1,"RECORDED","4.00",originalDate,"Conferência");
+        mvc.perform(post(route).contentType(MediaType.APPLICATION_JSON).content(valid))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post(route).header("Authorization","Bearer "+validatorAccess)
+            .contentType(MediaType.APPLICATION_JSON).content(valid))
+            .andExpect(status().isForbidden());
+        for(String invalid:List.of(
+                correction(1,"RECORDED","1000.00",originalDate,"Conferência"),
+                correction(1,"RECORDED","4.00",originalDate," "),
+                correction(1,"RECORDED","4.00",java.time.Instant.now().plusSeconds(3600),"Conferência")))
+            mvc.perform(post(route).header("Authorization","Bearer "+adminAccount.access())
+                .contentType(MediaType.APPLICATION_JSON).content(invalid))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post(route).header("Authorization","Bearer "+adminAccount.access())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(correction(1,"RECORDED","4.00",createdAt.plusNanos(1000),"Conferência")))
+            .andExpect(status().isUnprocessableEntity()); // Após o horário de criação da entrega.
+        mvc.perform(post(route).header("Authorization","Bearer "+adminAccount.access())
+            .contentType(MediaType.APPLICATION_JSON).content(valid)).andExpect(status().isOk());
+        mvc.perform(post(route).header("Authorization","Bearer "+adminAccount.access())
+            .contentType(MediaType.APPLICATION_JSON).content(valid))
+            .andExpect(status().isConflict());
+        assertThat(admin().queryForObject("SELECT revision FROM delivery_pev WHERE id=?",Integer.class,id))
+            .isEqualTo(2);
+    }
+
+    @Test void annulmentPreservesPhysicalFactsAndRestorationRebuildsPoints() throws Exception {
+        var validator=citizen();var beneficiary=citizen();
+        String access=login(validator.email());
+        UUID pev=approvedDeliveryPev(validator,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        UUID id=UUID.fromString(recordForTest(pev,access,qr,"3.70",date));
+        var persistedDate=admin().queryForObject("SELECT delivery_date FROM delivery_pev WHERE id=?",java.sql.Timestamp.class,id).toInstant();
+        var actor=activeAdmin();String route="/api/v1/admin/deliveries/"+id+"/corrections";
+        String annul=json.writeValueAsString(Map.of("expectedRevision",1,"recordStatus","ANNULLED","reason","Duplicidade conferida"));
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(correction(1,"ANNULLED","3.70",date,"Anulação")))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(annul))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value("ANNULLED"))
+            .andExpect(jsonPath("$.delivery.revision").value(2))
+            .andExpect(jsonPath("$.delivery.oilVolumeLiters").value(3.70))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(0))
+            .andExpect(jsonPath("$.balanceAfter").value(0));
+        assertThat(admin().queryForObject("SELECT delivery_date FROM delivery_pev WHERE id=?",java.sql.Timestamp.class,id).toInstant())
+            .isEqualTo(persistedDate);
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id())).isZero();
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(annul)).andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+                "expectedRevision",2,"recordStatus","ANNULLED","reason","Nova conferência"))))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUSINESS_STATE_CONFLICT"));
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(correction(2,"RECORDED","3.70",date,"Restauração conferida")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value("RECORDED"))
+            .andExpect(jsonPath("$.delivery.revision").value(3))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(3))
+            .andExpect(jsonPath("$.balanceAfter").value(3));
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id())).isEqualTo(3);
+        assertThat(admin().queryForObject("SELECT count(*) FROM point_calculation WHERE delivery_pev_id=? AND is_current",Long.class,id)).isEqualTo(1);
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev_log WHERE id=? AND snapshot_kind='AFTER' AND revision IN (2,3) AND performed_by=?",Long.class,id,actor.id())).isEqualTo(2);
+    }
+
+    @Test void administrativeQueriesPaginateAndExposeCurrentRevisionOnlyToActiveAdmins() throws Exception {
+        var validator=citizen();var beneficiary=citizen();
+        String access=login(validator.email());UUID pev=approvedDeliveryPev(validator,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        UUID first=UUID.fromString(recordForTest(pev,access,qr,"1.00",date));
+        UUID second=UUID.fromString(recordForTest(pev,access,qr,"2.00",date));
+        var actor=activeAdmin();String route="/api/v1/admin/deliveries";
+        mvc.perform(post(route+"/"+second+"/corrections").header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(correction(1,"RECORDED","4.50",date,"Volume revisado")))
+            .andExpect(status().isOk());
+        var expected=admin().queryForList("SELECT id FROM delivery_pev ORDER BY created_at DESC,id DESC",UUID.class);
+        long total=expected.size();
+        mvc.perform(get(route).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(total));
+        for(int page=0;page<2;page++)
+            mvc.perform(get(route).param("page",Integer.toString(page)).param("size","1")
+                .header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(page))
+                .andExpect(jsonPath("$.size").value(1)).andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(expected.get(page).toString()));
+        mvc.perform(get(route).param("page",Long.toString(total)).param("size","1")
+            .header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.totalElements").value(total));
+        mvc.perform(get(route+"/"+second).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.revision").value(2))
+            .andExpect(jsonPath("$.delivery.recordStatus").value("RECORDED"))
+            .andExpect(jsonPath("$.delivery.oilVolumeLiters").value(4.50))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(4))
+            .andExpect(jsonPath("$.balanceAfter").value(5));
+        mvc.perform(get(route+"/"+UUID.randomUUID()).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isNotFound());
+        for(String suffix:List.of("","/"+first)) {
+            mvc.perform(get(route+suffix)).andExpect(status().isUnauthorized());
+            mvc.perform(get(route+suffix).header("Authorization","Bearer "+access))
+                .andExpect(status().isForbidden());
+        }
+        for(String query:List.of("?page=","?size=","?page=-1","?size=101","?page=2147483647&size=20"))
+            mvc.perform(get(route+query).header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isBadRequest());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",actor.id());
+        for(String suffix:List.of("","/"+second))
+            mvc.perform(get(route+suffix).header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private String correction(int revision,String status,String volume,java.time.Instant date,String reason)
+            throws Exception {
+        return json.writeValueAsString(Map.of("expectedRevision",revision,"recordStatus",status,
+            "oilVolumeLiters",new java.math.BigDecimal(volume),"deliveryDate",date,"reason",reason));
+    }
+
+    private AdminAccount activeAdmin() throws Exception {
+        UUID id=UUID.randomUUID();String email=email();
+        var encoder=new org.springframework.security.crypto.argon2.Argon2PasswordEncoder(16,32,1,19456,2);
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,?,'ADMIN')",
+            id,email,encoder.encode(PASSWORD));
+        return new AdminAccount(id,login(email));
+    }
+
+    private record AdminAccount(UUID id,String access) { }
+
     @Test void recoversConfirmedDeliveryWithoutQrAfterPevInactivationAndRejectsChangedFacts() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
@@ -472,6 +651,9 @@ class PevIntegrationTest {
     @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
         var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var paths=json.readTree(response.getResponse().getContentAsString()).get("paths");
+        var schema=json.readTree(response.getResponse().getContentAsString()).get("components")
+            .get("schemas").get("PevDeliveryCorrection").get("properties");
+        assertThat(schema.has("statusPayloadValid")).isFalse();
         var pevs=paths.get("/api/v1/pevs");
         assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
         assertThat(pevs.get("post").get("security").toString()).contains("bearer");
