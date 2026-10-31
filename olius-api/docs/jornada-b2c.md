@@ -76,15 +76,16 @@ pontos e gestão de entregas. Parte dos cenários aprova o PEV diretamente na fi
 Os testes de correção também incluem validações de DTO, tradução de erros e falha
 da procedure. A presença desses testes não garante execução bem-sucedida nesta branch.
 
-Os próximos commits devem conectar cadastro, perfil/QR, solicitação, aprovação HTTP,
-identificação, entrega e leitura dos pontos com JWT real e `OfficialPostgres`.
-Também devem conectar correção/anulação/restauração às consultas do cidadão e do
-responsável, reutilizando os testes existentes quando isso cobrir o comportamento.
+Os cenários integrados desta branch conectam cadastro, perfil/QR, solicitação,
+aprovação HTTP, identificação, entrega e pontos com JWT real e `OfficialPostgres`.
+Também conectam correção/anulação/restauração às consultas do cidadão e do
+responsável. O [roteiro de validação](validacao-jornada-b2c.md) descreve o aceite
+manual e o comando de verificação automatizada.
 
 ## Dependências e limites
 
 - Mobile: apresentação do QR, estados de tela, paginação e preservação da chave de
-  reenvio precisam seguir as respostas reais; o guia de consumo será detalhado nesta branch.
+  reenvio precisam seguir as respostas reais do [guia de consumo](mobile-jornada-b2c.md).
 - Banco: conferir a fixture com a revisão oficial antes da implantação. Não há
   migração ou criação de índice nesta etapa.
 - Ranking: a API Redis lê a pontuação consolidada do PostgreSQL por identidade
