@@ -338,6 +338,7 @@ class PevIntegrationTest {
         String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
         var date=java.time.Instant.now().minusSeconds(3600);
         UUID id=UUID.fromString(recordForTest(pev,access,qr,"3.70",date));
+        var persistedDate=admin().queryForObject("SELECT delivery_date FROM delivery_pev WHERE id=?",java.sql.Timestamp.class,id).toInstant();
         var actor=activeAdmin();String route="/api/v1/admin/deliveries/"+id+"/corrections";
         String annul=json.writeValueAsString(Map.of("expectedRevision",1,"recordStatus","ANNULLED","reason","Duplicidade conferida"));
         mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
@@ -351,10 +352,15 @@ class PevIntegrationTest {
             .andExpect(jsonPath("$.delivery.pointsEarned").value(0))
             .andExpect(jsonPath("$.balanceAfter").value(0));
         assertThat(admin().queryForObject("SELECT delivery_date FROM delivery_pev WHERE id=?",java.sql.Timestamp.class,id).toInstant())
-            .isEqualTo(date.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+            .isEqualTo(persistedDate);
         assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id())).isZero();
         mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
-            .contentType(MediaType.APPLICATION_JSON).content(annul)).andExpect(status().isConflict());
+            .contentType(MediaType.APPLICATION_JSON).content(annul)).andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+                "expectedRevision",2,"recordStatus","ANNULLED","reason","Nova conferência"))))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUSINESS_STATE_CONFLICT"));
         mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
             .contentType(MediaType.APPLICATION_JSON).content(correction(2,"RECORDED","3.70",date,"Restauração conferida")))
             .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value("RECORDED"))
@@ -645,6 +651,9 @@ class PevIntegrationTest {
     @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
         var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var paths=json.readTree(response.getResponse().getContentAsString()).get("paths");
+        var schema=json.readTree(response.getResponse().getContentAsString()).get("components")
+            .get("schemas").get("PevDeliveryCorrection").get("properties");
+        assertThat(schema.has("statusPayloadValid")).isFalse();
         var pevs=paths.get("/api/v1/pevs");
         assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
         assertThat(pevs.get("post").get("security").toString()).contains("bearer");

@@ -1,6 +1,7 @@
 package br.com.olius.olius_core_api.dto;
 
 import br.com.olius.olius_core_api.entity.enums.RecordStatus;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
@@ -27,6 +28,8 @@ public final class DeliveryCorrectionContracts {
         @NotBlank @Size(max=MAX_REASON_LENGTH) String reason
     ) {
         @AssertTrue(message="Volume e data devem ser enviados somente para RECORDED")
+        @JsonIgnore
+        @Schema(hidden=true)
         public boolean isStatusPayloadValid() {
             if(recordStatus==null) return true;
             return recordStatus==RecordStatus.ANNULLED
