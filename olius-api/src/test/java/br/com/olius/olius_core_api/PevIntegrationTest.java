@@ -366,6 +366,55 @@ class PevIntegrationTest {
         assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev_log WHERE id=? AND snapshot_kind='AFTER' AND revision IN (2,3) AND performed_by=?",Long.class,id,actor.id())).isEqualTo(2);
     }
 
+    @Test void administrativeQueriesPaginateAndExposeCurrentRevisionOnlyToActiveAdmins() throws Exception {
+        var validator=citizen();var beneficiary=citizen();
+        String access=login(validator.email());UUID pev=approvedDeliveryPev(validator,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        UUID first=UUID.fromString(recordForTest(pev,access,qr,"1.00",date));
+        UUID second=UUID.fromString(recordForTest(pev,access,qr,"2.00",date));
+        var actor=activeAdmin();String route="/api/v1/admin/deliveries";
+        mvc.perform(post(route+"/"+second+"/corrections").header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(correction(1,"RECORDED","4.50",date,"Volume revisado")))
+            .andExpect(status().isOk());
+        var expected=admin().queryForList("SELECT id FROM delivery_pev ORDER BY created_at DESC,id DESC",UUID.class);
+        long total=expected.size();
+        mvc.perform(get(route).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(total));
+        for(int page=0;page<2;page++)
+            mvc.perform(get(route).param("page",Integer.toString(page)).param("size","1")
+                .header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(page))
+                .andExpect(jsonPath("$.size").value(1)).andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(expected.get(page).toString()));
+        mvc.perform(get(route).param("page",Long.toString(total)).param("size","1")
+            .header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.totalElements").value(total));
+        mvc.perform(get(route+"/"+second).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.revision").value(2))
+            .andExpect(jsonPath("$.delivery.recordStatus").value("RECORDED"))
+            .andExpect(jsonPath("$.delivery.oilVolumeLiters").value(4.50))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(4))
+            .andExpect(jsonPath("$.balanceAfter").value(5));
+        mvc.perform(get(route+"/"+UUID.randomUUID()).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isNotFound());
+        for(String suffix:List.of("","/"+first)) {
+            mvc.perform(get(route+suffix)).andExpect(status().isUnauthorized());
+            mvc.perform(get(route+suffix).header("Authorization","Bearer "+access))
+                .andExpect(status().isForbidden());
+        }
+        for(String query:List.of("?page=","?size=","?page=-1","?size=101","?page=2147483647&size=20"))
+            mvc.perform(get(route+query).header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isBadRequest());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",actor.id());
+        for(String suffix:List.of("","/"+second))
+            mvc.perform(get(route+suffix).header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isUnauthorized());
+    }
+
     private String correction(int revision,String status,String volume,java.time.Instant date,String reason)
             throws Exception {
         return json.writeValueAsString(Map.of("expectedRevision",revision,"recordStatus",status,
