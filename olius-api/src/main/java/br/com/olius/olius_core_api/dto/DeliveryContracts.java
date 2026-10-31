@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Pattern;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import br.com.olius.olius_core_api.entity.enums.RecordStatus;
 
 public final class DeliveryContracts {
     private DeliveryContracts() { }
@@ -28,4 +29,9 @@ public final class DeliveryContracts {
                 +oilVolumeLiters+", deliveryDate="+deliveryDate+"]";
         }
     }
+
+    @Schema(name="PevDeliveryView")
+    public record View(UUID id, UUID pevId, UUID citizenId, BigDecimal oilVolumeLiters,
+        Instant deliveryDate, Instant createdAt, long pointsEarned, RecordStatus recordStatus,
+        int revision, long balanceAfter) { }
 }
