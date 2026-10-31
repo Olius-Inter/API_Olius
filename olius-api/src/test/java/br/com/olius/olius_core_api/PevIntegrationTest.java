@@ -13,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -47,6 +48,95 @@ class PevIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired QrIdentificationService qrIdentification;
     private static final String PASSWORD="Password1!";
+    private final List<UUID> deliveryPevIds=new ArrayList<>();
+
+    @AfterEach void retireDeliveryTestPevs() {
+        for(UUID id:deliveryPevIds)
+            admin().update("UPDATE pev SET status='INACTIVE' WHERE id=? AND status='APPROVED'",id);
+    }
+
+    @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String access=login(validator.email());
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isCreated()).andReturn();
+        UUID pevId=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pevId);
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE id=?",
+            adminId,pevId);
+        var delivery=mvc.perform(post("/api/v1/pevs/{id}/deliveries",pevId)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(UUID.randomUUID(),qr,"3.70",java.time.Instant.now().minusSeconds(3600))))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.pevId").value(pevId.toString()))
+            .andExpect(jsonPath("$.citizenId").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.oilVolumeLiters").value(3.70))
+            .andExpect(jsonPath("$.pointsEarned").value(3))
+            .andExpect(jsonPath("$.balanceAfter").value(3))
+            .andExpect(jsonPath("$.recordStatus").value("RECORDED"))
+            .andExpect(jsonPath("$.revision").value(1)).andReturn();
+        UUID deliveryId=UUID.fromString(json.readTree(delivery.getResponse().getContentAsString()).get("id").asText());
+        assertThat(delivery.getResponse().getHeader("Location"))
+            .isEqualTo("/api/v1/pevs/"+pevId+"/deliveries/"+deliveryId);
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id()))
+            .isEqualTo(3);
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE id=?",Long.class,deliveryId))
+            .isEqualTo(1);
+        assertThat(admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id())).isEqualTo(qr);
+    }
+
+    @Test void rejectsInvalidDeliveryFactsAndUnauthorizedValidator() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        var outsider=citizen();
+        String access=login(validator.email());
+        String otherAccess=login(outsider.email());
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isCreated()).andReturn();
+        UUID pevId=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pevId);
+        String endpoint="/api/v1/pevs/"+pevId+"/deliveries";
+        String valid=deliveryRequest(UUID.randomUUID(),qr,"0.75",java.time.Instant.now().minusSeconds(60));
+        mvc.perform(post(endpoint).contentType(MediaType.APPLICATION_JSON).content(valid))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+otherAccess)
+            .contentType(MediaType.APPLICATION_JSON).content(valid))
+            .andExpect(status().isForbidden());
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(valid))
+            .andExpect(status().isForbidden()); // PEV ainda PENDING.
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE id=?",
+            adminId,pevId);
+        for(String volume : List.of("0","-1","1.001","1000.00"))
+            mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(deliveryRequest(UUID.randomUUID(),qr,volume,java.time.Instant.now().minusSeconds(60))))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(UUID.randomUUID(),qr,"1.00",java.time.Instant.now().plusSeconds(3600))))
+            .andExpect(status().isBadRequest());
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE pev_id=?",Long.class,pevId))
+            .isZero();
+    }
+
+    private String deliveryRequest(UUID key,String qr,String volume,java.time.Instant date) throws Exception {
+        return json.writeValueAsString(Map.of("idempotencyKey",key,"qrToken",qr,
+            "oilVolumeLiters",new java.math.BigDecimal(volume),"deliveryDate",date));
+    }
 
     @Test void qrIdentificationRequiresApprovedPevAndKeepsTheTokenUnchanged() throws Exception {
         var validator=citizen();
