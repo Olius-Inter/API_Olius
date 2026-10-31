@@ -331,6 +331,41 @@ class PevIntegrationTest {
             .isEqualTo(2);
     }
 
+    @Test void annulmentPreservesPhysicalFactsAndRestorationRebuildsPoints() throws Exception {
+        var validator=citizen();var beneficiary=citizen();
+        String access=login(validator.email());
+        UUID pev=approvedDeliveryPev(validator,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        UUID id=UUID.fromString(recordForTest(pev,access,qr,"3.70",date));
+        var actor=activeAdmin();String route="/api/v1/admin/deliveries/"+id+"/corrections";
+        String annul=json.writeValueAsString(Map.of("expectedRevision",1,"recordStatus","ANNULLED","reason","Duplicidade conferida"));
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(correction(1,"ANNULLED","3.70",date,"Anulação")))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(annul))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value("ANNULLED"))
+            .andExpect(jsonPath("$.delivery.revision").value(2))
+            .andExpect(jsonPath("$.delivery.oilVolumeLiters").value(3.70))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(0))
+            .andExpect(jsonPath("$.balanceAfter").value(0));
+        assertThat(admin().queryForObject("SELECT delivery_date FROM delivery_pev WHERE id=?",java.sql.Timestamp.class,id).toInstant())
+            .isEqualTo(date.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id())).isZero();
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(annul)).andExpect(status().isConflict());
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content(correction(2,"RECORDED","3.70",date,"Restauração conferida")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value("RECORDED"))
+            .andExpect(jsonPath("$.delivery.revision").value(3))
+            .andExpect(jsonPath("$.delivery.pointsEarned").value(3))
+            .andExpect(jsonPath("$.balanceAfter").value(3));
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id())).isEqualTo(3);
+        assertThat(admin().queryForObject("SELECT count(*) FROM point_calculation WHERE delivery_pev_id=? AND is_current",Long.class,id)).isEqualTo(1);
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev_log WHERE id=? AND snapshot_kind='AFTER' AND revision IN (2,3) AND performed_by=?",Long.class,id,actor.id())).isEqualTo(2);
+    }
+
     private String correction(int revision,String status,String volume,java.time.Instant date,String reason)
             throws Exception {
         return json.writeValueAsString(Map.of("expectedRevision",revision,"recordStatus",status,
