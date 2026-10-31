@@ -150,6 +150,50 @@ class PevIntegrationTest {
             .andExpect(status().isForbidden());
     }
 
+    @Test void administrativeChangesAppearInCitizenPointsAndOwnerDeliveryQueries() throws Exception {
+        var owner=citizen();var beneficiary=citizen();
+        String ownerAccess=login(owner.email()),citizenAccess=login(beneficiary.email());
+        UUID pev=approvedDeliveryPev(owner,ownerAccess);
+        var profile=mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andReturn();
+        String qr=json.readTree(profile.getResponse().getContentAsString()).get("qrToken").asText();
+        var date=java.time.Instant.now().minusSeconds(3600);
+        UUID id=UUID.fromString(recordForTest(pev,ownerAccess,qr,"3.70",date));
+        var actor=activeAdmin();
+        String deliveries="/api/v1/pevs/"+pev+"/deliveries";
+        String administrative="/api/v1/admin/deliveries/"+id;
+        String[] states={"RECORDED","ANNULLED","RECORDED"};
+        String[] volumes={"5.25",null,"2.75"};
+        int[] points={5,0,2};
+        for(int step=0;step<states.length;step++) {
+            String payload=volumes[step]==null
+                ? json.writeValueAsString(Map.of("expectedRevision",step+1,"recordStatus",states[step],"reason","Anulação conferida"))
+                : correction(step+1,states[step],volumes[step],date,"Conferência administrativa");
+            mvc.perform(post(administrative+"/corrections").header("Authorization","Bearer "+actor.access())
+                .contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.revision").value(step+2));
+            mvc.perform(get(administrative).header("Authorization","Bearer "+actor.access()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value(states[step]))
+                .andExpect(jsonPath("$.delivery.pointsEarned").value(points[step]))
+                .andExpect(jsonPath("$.balanceAfter").value(points[step]));
+            mvc.perform(get(deliveries+"/"+id).header("Authorization","Bearer "+ownerAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(step+2))
+                .andExpect(jsonPath("$.recordStatus").value(states[step]))
+                .andExpect(jsonPath("$.pointsEarned").value(points[step]));
+            mvc.perform(get(deliveries).header("Authorization","Bearer "+ownerAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(id.toString()))
+                .andExpect(jsonPath("$.items[0].recordStatus").value(states[step]))
+                .andExpect(jsonPath("$.items[0].revision").value(step+2));
+            mvc.perform(get("/api/v1/users/me/points").header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(points[step]))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.movements.length()").value(1))
+                .andExpect(jsonPath("$.movements[0].deliveryId").value(id.toString()))
+                .andExpect(jsonPath("$.movements[0].points").value(points[step]));
+        }
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
