@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -15,7 +16,7 @@ public class PointsService {
     private final JdbcTemplate jdbc;
     public PointsService(JdbcTemplate jdbc) { this.jdbc=jdbc; }
 
-    @Transactional(readOnly=true)
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public Summary own(UUID citizen,int page,int size) {
         long offset=(long)page*size;
         if(offset>Integer.MAX_VALUE) throw new ResponseStatusException(HttpStatus.BAD_REQUEST);

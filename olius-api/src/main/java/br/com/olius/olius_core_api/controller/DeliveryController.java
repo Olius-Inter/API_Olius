@@ -42,4 +42,10 @@ public class DeliveryController {
         return service.listForPev(pevId,Caller.id(authentication),Caller.type(authentication),
             PevPagination.page(page),PevPagination.size(size));
     }
+
+    @GetMapping("/{deliveryId}")
+    public View detail(@PathVariable UUID pevId,@PathVariable UUID deliveryId,
+                       Authentication authentication) {
+        return service.detail(pevId,deliveryId,Caller.id(authentication),Caller.type(authentication));
+    }
 }

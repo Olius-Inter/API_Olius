@@ -122,6 +122,10 @@ public class OpenApiConfiguration {
             operation.setSummary("Listar entregas do próprio PEV");
             operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
                 .setDescription("Página de entregas com identificação mínima do cidadão.");
+        } else if (path.equals("/api/v1/pevs/{pevId}/deliveries/{deliveryId}") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Consultar entrega do próprio PEV");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Entrega confirmada acessível ao responsável do PEV.");
         } else if (path.equals("/api/v1/users/me/points") && method == PathItem.HttpMethod.GET) {
             operation.setSummary("Consultar próprios pontos e movimentações");
             operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
@@ -159,9 +163,11 @@ public class OpenApiConfiguration {
 
     private String description(String path, PathItem.HttpMethod method) {
         if(path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.POST)
-            return "Responsável ativo do PEV registra volume aceito de 0.01 a 999.99 litros e data física não futura. O QR identifica cidadão ativo somente na criação. idempotencyKey UUID vincula reenvios ao validador; 201 cria, 200 recupera sem duplicar pontos. Dados originais divergentes retornam 409.";
+            return "Responsável ativo do PEV registra volume aceito de 0.01 a 999.99 litros e data física não futura. O QR identifica cidadão ativo somente na criação. No reenvio, qrToken é ignorado e o cidadão original é reutilizado. idempotencyKey UUID vincula reenvios ao validador; 201 cria com Location consultável, 200 recupera sem duplicar pontos. PEV, volume ou data originais divergentes retornam 409.";
         if(path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.GET)
             return "Responsável ativo consulta apenas entregas do próprio PEV. Dados mínimos do cidadão: ID e nome. page começa em 0; size padrão 20 e máximo 100. Ordem createdAt DESC, id DESC; parâmetros vazios e deslocamento acima de Integer.MAX_VALUE retornam 400.";
+        if(path.equals("/api/v1/pevs/{pevId}/deliveries/{deliveryId}") && method == PathItem.HttpMethod.GET)
+            return "Responsável ativo consulta a entrega indicada por Location somente quando ela pertence ao próprio PEV. ID inexistente ou de outro PEV retorna 404; outro responsável recebe 403.";
         if(path.equals("/api/v1/users/me/points") && method == PathItem.HttpMethod.GET)
             return "Cidadão autenticado consulta saldo geral do PostgreSQL e movimentações atuais de entregas, sem somar revisões antigas. page começa em 0; size padrão 20 e máximo 100. Ordem deliveryDate DESC, id DESC. Recorte anual de ranking não integra esta resposta.";
         if(path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST)

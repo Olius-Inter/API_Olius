@@ -84,6 +84,9 @@ class PevIntegrationTest {
         UUID deliveryId=UUID.fromString(json.readTree(delivery.getResponse().getContentAsString()).get("id").asText());
         assertThat(delivery.getResponse().getHeader("Location"))
             .isEqualTo("/api/v1/pevs/"+pevId+"/deliveries/"+deliveryId);
+        mvc.perform(get(delivery.getResponse().getHeader("Location"))
+            .header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(deliveryId.toString()));
         assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id()))
             .isEqualTo(3);
         assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE id=?",Long.class,deliveryId))
@@ -138,6 +141,26 @@ class PevIntegrationTest {
             "oilVolumeLiters",new java.math.BigDecimal(volume),"deliveryDate",date));
     }
 
+    @Test void recordsFractionalDeliveryBelowOneLiterWithoutAwardingPoints() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String access=login(validator.email());
+        UUID pev=approvedDeliveryPev(validator,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        var result=mvc.perform(post("/api/v1/pevs/{id}/deliveries",pev)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(UUID.randomUUID(),qr,"0.75",
+                java.time.Instant.now().minusSeconds(60))))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.pointsEarned").value(0))
+            .andExpect(jsonPath("$.balanceAfter").value(0)).andReturn();
+        UUID id=UUID.fromString(json.readTree(result.getResponse().getContentAsString()).get("id").asText());
+        assertThat(admin().queryForObject("SELECT points_earned FROM delivery_pev WHERE id=?",Long.class,id))
+            .isZero();
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id()))
+            .isZero();
+    }
+
     @Test void listsOnlyOwnPevDeliveriesWithStablePagesAndMinimalCitizenData() throws Exception {
         var owner=citizen();
         var otherOwner=citizen();
@@ -174,6 +197,15 @@ class PevIntegrationTest {
             .header("Authorization","Bearer "+access))
             .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(first))
             .andExpect(jsonPath("$.totalElements").value(2));
+        mvc.perform(get(endpoint).param("page","2").param("size","1")
+            .header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0))
+            .andExpect(jsonPath("$.totalElements").value(2));
+        mvc.perform(get(endpoint+"/"+first).header("Authorization","Bearer "+otherAccess))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/pevs/"+otherPev+"/deliveries/"+first)
+            .header("Authorization","Bearer "+otherAccess))
+            .andExpect(status().isNotFound());
         for(String query : List.of("?page=", "?size=", "?page=2147483647&size=20"))
             mvc.perform(get(endpoint+query).header("Authorization","Bearer "+access))
                 .andExpect(status().isBadRequest());
@@ -207,6 +239,11 @@ class PevIntegrationTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(4))
             .andExpect(jsonPath("$.movements.length()").value(1))
             .andExpect(jsonPath("$.movements[0].deliveryId").value(first));
+        mvc.perform(get(endpoint).param("page","2").param("size","1")
+            .header("Authorization","Bearer "+beneficiaryAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(4))
+            .andExpect(jsonPath("$.movements.length()").value(0))
+            .andExpect(jsonPath("$.totalElements").value(2));
         mvc.perform(get(endpoint).header("Authorization","Bearer "+otherAccess))
             .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(0))
             .andExpect(jsonPath("$.movements.length()").value(0));
@@ -224,10 +261,13 @@ class PevIntegrationTest {
     @Test void recoversConfirmedDeliveryWithoutQrAfterPevInactivationAndRejectsChangedFacts() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
+        var otherBeneficiary=citizen();
         String access=login(validator.email());
         UUID pevId=approvedDeliveryPev(validator,access);
         String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
             String.class,beneficiary.id());
+        String otherQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,otherBeneficiary.id());
         UUID key=UUID.randomUUID();
         var date=java.time.Instant.now().minusSeconds(120);
         String endpoint="/api/v1/pevs/"+pevId+"/deliveries";
@@ -248,6 +288,11 @@ class PevIntegrationTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(deliveryId));
         mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
             .contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(key,otherQr,"2.50",date)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(deliveryId))
+            .andExpect(jsonPath("$.citizenId").value(beneficiary.id().toString()));
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
             .content(json.writeValueAsString(Map.of("idempotencyKey",key,
                 "oilVolumeLiters",new java.math.BigDecimal("3.00"),"deliveryDate",date))))
             .andExpect(status().isConflict());
@@ -256,6 +301,8 @@ class PevIntegrationTest {
             .isEqualTo(1);
         assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id()))
             .isEqualTo(2);
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,otherBeneficiary.id()))
+            .isZero();
         admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",validator.id());
         mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
             .contentType(MediaType.APPLICATION_JSON).content(retry))

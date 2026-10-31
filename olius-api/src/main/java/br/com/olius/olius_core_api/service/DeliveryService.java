@@ -46,15 +46,7 @@ public class DeliveryService {
             if(input.qrToken()==null)
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"QR obrigatório na criação");
             // A leitura do QR exige PEV aprovado. A recuperação não depende do estado atual.
-            try {
-                citizen=qr.identify(input.qrToken(),validator,actorType).id();
-            } catch(ResourceNotFoundException unknownQr) {
-                // Releitura autorizada caso outra requisição tenha confirmado a chave.
-                var concurrent=deliveries.existing(internalKey,validator);
-                if(concurrent.isEmpty()) throw unknownQr;
-                citizen=concurrent.get().citizenId();
-                created=false;
-            }
+            citizen=qr.identify(input.qrToken(),validator,actorType).id();
         } else {
             citizen=previous.get().citizenId();
         }
@@ -86,6 +78,14 @@ public class DeliveryService {
     }
 
     public record Result(View delivery,boolean created) { }
+
+    @Transactional(readOnly=true)
+    public View detail(UUID pevId,UUID deliveryId,UUID validator,UserType actorType) {
+        requireValidatorAndPev(pevId,validator,actorType);
+        View view=deliveries.view(deliveryId,validator).orElseThrow(ResourceNotFoundException::new);
+        if(!view.pevId().equals(pevId)) throw new ResourceNotFoundException();
+        return view;
+    }
 
     @Transactional(readOnly=true)
     public PevPage listForPev(UUID pevId,UUID validator,UserType actorType,int page,int size) {
