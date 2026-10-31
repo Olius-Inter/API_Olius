@@ -138,6 +138,102 @@ class PevIntegrationTest {
             "oilVolumeLiters",new java.math.BigDecimal(volume),"deliveryDate",date));
     }
 
+    @Test void recoversConfirmedDeliveryWithoutQrAfterPevInactivationAndRejectsChangedFacts() throws Exception {
+        var validator=citizen();
+        var beneficiary=citizen();
+        String access=login(validator.email());
+        UUID pevId=approvedDeliveryPev(validator,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        UUID key=UUID.randomUUID();
+        var date=java.time.Instant.now().minusSeconds(120);
+        String endpoint="/api/v1/pevs/"+pevId+"/deliveries";
+        var first=mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(deliveryRequest(key,qr,"2.50",date)))
+            .andExpect(status().isCreated()).andReturn();
+        String deliveryId=json.readTree(first.getResponse().getContentAsString()).get("id").asText();
+        admin().update("UPDATE pev SET status='INACTIVE' WHERE id=?",pevId);
+        String retry=json.writeValueAsString(Map.of("idempotencyKey",key,
+            "oilVolumeLiters",new java.math.BigDecimal("2.50"),"deliveryDate",date));
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(retry))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(deliveryId))
+            .andExpect(jsonPath("$.pointsEarned").value(2));
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(key,"A".repeat(43),"2.50",date)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(deliveryId));
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json.writeValueAsString(Map.of("idempotencyKey",key,
+                "oilVolumeLiters",new java.math.BigDecimal("3.00"),"deliveryDate",date))))
+            .andExpect(status().isConflict());
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE idempotency_key=?",
+            Long.class,br.com.olius.olius_core_api.service.DeliveryKeys.internal(validator.id(),key)))
+            .isEqualTo(1);
+        assertThat(admin().queryForObject("SELECT points FROM citizens WHERE id=?",Long.class,beneficiary.id()))
+            .isEqualTo(2);
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",validator.id());
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(retry))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test void concurrentReplaysCreateOnceAndAnotherValidatorCannotReadTheOriginalKey() throws Exception {
+        var validator=citizen();
+        var other=citizen();
+        var beneficiary=citizen();
+        String access=login(validator.email());
+        String otherAccess=login(other.email());
+        UUID pevId=approvedDeliveryPev(validator,access);
+        UUID otherPev=approvedDeliveryPev(other,otherAccess);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
+            String.class,beneficiary.id());
+        UUID key=UUID.randomUUID();
+        var date=java.time.Instant.now().minusSeconds(120);
+        String body=deliveryRequest(key,qr,"1.25",date);
+        var start=new CountDownLatch(1);
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<org.springframework.test.web.servlet.MvcResult> attempt=()-> {
+                start.await();
+                return mvc.perform(post("/api/v1/pevs/{id}/deliveries",pevId)
+                    .header("Authorization","Bearer "+access)
+                    .contentType(MediaType.APPLICATION_JSON).content(body)).andReturn();
+            };
+            var a=pool.submit(attempt);
+            var b=pool.submit(attempt);
+            start.countDown();
+            var first=a.get(30,TimeUnit.SECONDS);
+            var second=b.get(30,TimeUnit.SECONDS);
+            assertThat(List.of(first.getResponse().getStatus(),second.getResponse().getStatus()))
+                .containsExactlyInAnyOrder(201,200);
+            assertThat(json.readTree(first.getResponse().getContentAsString()).get("id").asText())
+                .isEqualTo(json.readTree(second.getResponse().getContentAsString()).get("id").asText());
+        }
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE pev_id=?",Long.class,pevId))
+            .isEqualTo(1);
+        mvc.perform(post("/api/v1/pevs/{id}/deliveries",otherPev)
+            .header("Authorization","Bearer "+otherAccess)
+            .contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated());
+        assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE citizen_id=?",Long.class,beneficiary.id()))
+            .isEqualTo(2);
+    }
+
+    private UUID approvedDeliveryPev(Account owner,String access) throws Exception {
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isCreated()).andReturn();
+        UUID pevId=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pevId);
+        UUID adminId=UUID.randomUUID();
+        admin().update("INSERT INTO users(id,name,email,password_hash,user_type) VALUES (?,'Admin',?,'fixture-only','ADMIN')",
+            adminId,email());
+        admin().update("UPDATE pev SET status='APPROVED',approved_by=?,approved_at=clock_timestamp() WHERE id=?",
+            adminId,pevId);
+        return pevId;
+    }
+
     @Test void qrIdentificationRequiresApprovedPevAndKeepsTheTokenUnchanged() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
