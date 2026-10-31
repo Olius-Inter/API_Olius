@@ -55,6 +55,53 @@ class PevIntegrationTest {
             admin().update("UPDATE pev SET status='INACTIVE' WHERE id=? AND status='APPROVED'",id);
     }
 
+    @Test void citizenJourneyUsesProfileQrIdentificationDeliveryAndOwnPointsOverHttp() throws Exception {
+        var beneficiary=citizen();var validator=citizen();
+        String citizenAccess=login(beneficiary.email());
+        String validatorAccess=login(validator.email());
+        var profile=mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.qrToken").isNotEmpty()).andReturn();
+        String qr=json.readTree(profile.getResponse().getContentAsString()).get("qrToken").asText();
+        mvc.perform(get("/api/v1/users/me/points").header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(0))
+            .andExpect(jsonPath("$.movements").isEmpty());
+        var requested=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+validatorAccess)
+            .contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PENDING")).andReturn();
+        UUID pev=UUID.fromString(json.readTree(requested.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pev);
+        var actor=activeAdmin();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                "/api/v1/admin/pevs/{id}/status",pev).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"APPROVED\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPROVED"));
+        mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+validatorAccess)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("qrToken",qr))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.name").value("Cidadão"))
+            .andExpect(jsonPath("$.qrToken").doesNotExist());
+        var recorded=mvc.perform(post("/api/v1/pevs/{id}/deliveries",pev)
+            .header("Authorization","Bearer "+validatorAccess).contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(UUID.randomUUID(),qr,"3.70",java.time.Instant.now().minusSeconds(60))))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.citizenId").value(beneficiary.id().toString()))
+            .andExpect(jsonPath("$.pointsEarned").value(3)).andReturn();
+        String delivery=json.readTree(recorded.getResponse().getContentAsString()).get("id").asText();
+        mvc.perform(get(recorded.getResponse().getHeader("Location"))
+            .header("Authorization","Bearer "+validatorAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(delivery));
+        mvc.perform(get("/api/v1/users/me/points").header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(3))
+            .andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.movements[0].deliveryId").value(delivery))
+            .andExpect(jsonPath("$.movements[0].points").value(3));
+        mvc.perform(get("/api/v1/users/me/points").header("Authorization","Bearer "+validatorAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(0))
+            .andExpect(jsonPath("$.movements").isEmpty());
+        mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.qrToken").value(qr));
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
