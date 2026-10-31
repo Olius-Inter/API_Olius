@@ -10,6 +10,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OpenApiConfigurationTest {
     private final OpenApiConfiguration configuration = new OpenApiConfiguration();
 
+    @Test void deliveryAndPointsOperationsRequireBearerAndDocumentTheirResponses() {
+        var api=configuration.identityOpenApi();
+        var record=new Operation();
+        var deliveries=new Operation();
+        var points=new Operation();
+        api.setPaths(new Paths()
+            .addPathItem("/api/v1/pevs/{pevId}/deliveries",new PathItem().post(record).get(deliveries))
+            .addPathItem("/api/v1/users/me/points",new PathItem().get(points)));
+        configuration.identityContracts().customise(api);
+        assertThat(record.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(record.getResponses()).containsKeys("201","200","400","401","403","409");
+        assertThat(record.getDescription()).contains("999.99","idempotencyKey","QR");
+        assertThat(deliveries.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(deliveries.getResponses()).containsKey("200");
+        assertThat(deliveries.getDescription()).contains("createdAt DESC","size padrão 20");
+        assertThat(points.getSecurity().getFirst()).containsKey("bearer");
+        assertThat(points.getResponses()).containsKey("200");
+        assertThat(points.getDescription()).contains("saldo geral","revisões antigas");
+    }
+
     @Test
     void qrIdentificationRequiresBearerAndDocumentsMinimalResponse() {
         var api = configuration.identityOpenApi();

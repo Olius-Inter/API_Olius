@@ -47,9 +47,9 @@ Os nomes finais das rotas e as representações são propostas para conciliaçã
 | Identificar cidadão por QR | `POST /api/v1/qr/resolutions` | Responsável ativo por PEV `APPROVED`; token no corpo, identificação mínima do cidadão ativo. A leitura não altera o token nem registra entrega. |
 | Registrar ou recuperar entrega | `POST /api/v1/pevs/{id}/deliveries` | Responsável autenticado do PEV; criação exige PEV aprovado e QR vigente. Recuperação por chave de entrega já confirmada segue a seção de idempotência. `201` na criação e `200` na recuperação, sob bloqueio transacional por chave interna. |
 | Histórico próprio | `GET /api/v1/users/me/deliveries` | Cidadão beneficiário; `200` paginado. |
-| Entregas do PEV | `GET /api/v1/pevs/{id}/deliveries` | Responsável do PEV; dados mínimos do beneficiário e paginação. |
+| Entregas do PEV | `GET /api/v1/pevs/{id}/deliveries` | Responsável ativo do PEV; ID e nome do beneficiário, sem documento, contato ou QR. `page=0`, `size=20` por padrão, máximo 100; ordem `createdAt DESC, id DESC`. |
 | Listar/detalhar entregas para gestão | `GET /api/v1/admin/deliveries` e `GET /api/v1/admin/deliveries/{id}` | ADMIN; lista paginada e detalhe, incluindo estado e revisão vigentes. |
-| Pontos próprios | `GET /api/v1/users/me/points` | Titular; separar saldo geral, movimentações vigentes e eventual recorte anual. |
+| Pontos próprios | `GET /api/v1/users/me/points` | Cidadão titular; saldo geral e movimentações vigentes de entregas, paginadas por `deliveryDate DESC, id DESC`. `page=0`, `size=20` por padrão, máximo 100. O recorte anual do ranking não compõe esta resposta. |
 | Corrigir/anular/restaurar | `POST /api/v1/admin/deliveries/{id}/corrections` | ADMIN; motivo e revisão esperada. `ANNULLED` anula sem mudar volume/data; `RECORDED` corrige ou restaura. `200` com revisão resultante proposto. |
 
 ### Formatos de entrada propostos

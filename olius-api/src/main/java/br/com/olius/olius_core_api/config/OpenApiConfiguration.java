@@ -20,7 +20,7 @@ public class OpenApiConfiguration {
     @Bean
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
-            .description("Cadastro, identidade, PEV, pagamentos, solicitações, agenda e coletas B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            .description("Cadastro, identidade, PEV, entregas e pontos B2C, pagamentos, solicitações, agenda e coletas B2B. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -112,7 +112,21 @@ public class OpenApiConfiguration {
             new MediaType().schema(new Schema<>().$ref("#/components/schemas/ApiProblem"))));
     }
     private void documentPevResponse(String path, PathItem.HttpMethod method, Operation operation) {
-        if (path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST) {
+        if (path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.POST) {
+            operation.setSummary("Registrar ou recuperar entrega no PEV");
+            operation.getResponses().computeIfAbsent("201", ignored -> new ApiResponse())
+                .setDescription("Entrega criada; Location aponta para a entrega.");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Entrega já confirmada recuperada pela mesma chave e validador.");
+        } else if (path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Listar entregas do próprio PEV");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Página de entregas com identificação mínima do cidadão.");
+        } else if (path.equals("/api/v1/users/me/points") && method == PathItem.HttpMethod.GET) {
+            operation.setSummary("Consultar próprios pontos e movimentações");
+            operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
+                .setDescription("Saldo geral e página de movimentações vigentes de entregas.");
+        } else if (path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST) {
             operation.setSummary("Identificar cidadão por QR");
             operation.getResponses().computeIfAbsent("200", ignored -> new ApiResponse())
                 .setDescription("Identificação mínima do cidadão ativo: ID e nome.");
@@ -144,6 +158,12 @@ public class OpenApiConfiguration {
     }
 
     private String description(String path, PathItem.HttpMethod method) {
+        if(path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.POST)
+            return "Responsável ativo do PEV registra volume aceito de 0.01 a 999.99 litros e data física não futura. O QR identifica cidadão ativo somente na criação. idempotencyKey UUID vincula reenvios ao validador; 201 cria, 200 recupera sem duplicar pontos. Dados originais divergentes retornam 409.";
+        if(path.equals("/api/v1/pevs/{pevId}/deliveries") && method == PathItem.HttpMethod.GET)
+            return "Responsável ativo consulta apenas entregas do próprio PEV. Dados mínimos do cidadão: ID e nome. page começa em 0; size padrão 20 e máximo 100. Ordem createdAt DESC, id DESC; parâmetros vazios e deslocamento acima de Integer.MAX_VALUE retornam 400.";
+        if(path.equals("/api/v1/users/me/points") && method == PathItem.HttpMethod.GET)
+            return "Cidadão autenticado consulta saldo geral do PostgreSQL e movimentações atuais de entregas, sem somar revisões antigas. page começa em 0; size padrão 20 e máximo 100. Ordem deliveryDate DESC, id DESC. Recorte anual de ranking não integra esta resposta.";
         if(path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST)
             return "Responsável ativo por PEV APPROVED identifica cidadão ativo pelo token único do QR. Exige Bearer; retorna somente ID e nome. A leitura não altera o token, não registra entrega nem concede pontos. QR inválido ou desconhecido retorna 404; acesso sem PEV aprovado retorna 403. Autoidentificação é proibida.";
         if(path.startsWith("/api/v1/admin/financial-recovery/")) return "Somente ADMIN ativo. Consultas paginadas de cobranças abertas e reembolsos não concluídos; detalhes por ID incluem estados finais. POST exige justificativa. Reembolso consulta exclusivamente o providerRefundId existente e valida vínculo/valor na Stripe; nunca cria outra devolução. Cobrança reutiliza reconciliação conservadora e não aceita substituição de identidade nem confirmação manual de pagamento. HTTP 200 informa o estado observado, sem garantir resolução; 409 indica estado concorrente/incompatível e 503 falha externa ou integração desabilitada.";
