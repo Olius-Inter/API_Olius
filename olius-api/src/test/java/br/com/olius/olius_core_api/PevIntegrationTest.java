@@ -820,6 +820,17 @@ class PevIntegrationTest {
         var schema=json.readTree(response.getResponse().getContentAsString()).get("components")
             .get("schemas").get("PevDeliveryCorrection").get("properties");
         assertThat(schema.has("statusPayloadValid")).isFalse();
+        for(String route:List.of("/api/v1/admin/deliveries","/api/v1/admin/deliveries/{id}")) {
+            var operation=paths.get(route).get("get");
+            assertThat(operation.get("security").toString()).contains("bearer");
+            assertThat(operation.get("summary").asText()).contains("administrativ");
+        }
+        var correction=paths.get("/api/v1/admin/deliveries/{id}/corrections").get("post");
+        assertThat(correction.get("summary").asText()).contains("restaurar");
+        assertThat(correction.get("responses").has("409")).isTrue();
+        for(String absent:List.of("/api/v1/pevs/me/resubmissions","/api/v1/pevs/me/address",
+                "/api/v1/users/me/deliveries"))
+            assertThat(paths.has(absent)).isFalse();
         var pevs=paths.get("/api/v1/pevs");
         assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
         assertThat(pevs.get("post").get("security").toString()).contains("bearer");

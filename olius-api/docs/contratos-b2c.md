@@ -1,6 +1,6 @@
 # Contrato da jornada B2C — decisões aprovadas e pontos de integração
 
-**Estado:** regras funcionais aprovadas abaixo; rotas e formatos identificados como propostas ainda exigem conciliação. Este arquivo não implementa endpoints.
+**Estado:** contrato conciliado com as rotas implementadas na Core. Capacidades ainda sem endpoint são identificadas separadamente. Consulte o [inventário](jornada-b2c.md) e o [guia do Mobile](mobile-jornada-b2c.md) para a sequência de uso e os limites atuais.
 
 **Fontes:** orientação consolidada para o desenvolvimento B2C encaminhada em 18/10/2026 e decisão posterior da equipe sobre QR único por titular; commit `849031c` da Core API, scripts 01–05 e `access_control/01_roles.sql` da fixture, `docs/identidade-seguranca.md` e `docs/tratamento-de-erros.md`.
 
@@ -31,31 +31,31 @@ O PostgreSQL é a fonte da pontuação consolidada. Na arquitetura aprovada para
 - **Entrega:** `deliveryDate` é a data física obrigatória, não futura. Lançamento retroativo é permitido sem limite arbitrário de dias. Registra-se somente volume aceito, com pontos calculados por evento no banco.
 - **Correção:** ADMIN pode anular sem editar volume/data. Uma entrega anulada pode ser restaurada a `RECORDED` com justificativa, revisão esperada e recálculo; na restauração, os valores informados devem cumprir as validações da procedure. O histórico e as revisões são preservados.
 
-## 4. Operações REST propostas
+## 4. Operações REST disponíveis e capacidades pendentes
 
-Os nomes finais das rotas e as representações são propostas para conciliação. As capacidades e regras funcionais da seção anterior já estão aprovadas. Listas precisam de paginação, limites e ordem estável; nenhum lookup deve expor CPF, e-mail ou endereço pessoal.
+As rotas abaixo estão implementadas, exceto as linhas marcadas como **não implementada**. As regras aprovadas da seção anterior continuam válidas para as capacidades pendentes. Consultas públicas e identificação de beneficiário não expõem documento, contato ou endereço pessoal.
 
-| Operação | Rota proposta | Acesso e resposta proposta |
+| Operação | Rota | Acesso e resposta |
 | --- | --- | --- |
 | Solicitar PEV | `POST /api/v1/pevs` | Cidadão/estabelecimento ativo; responsável do token. `201` com `Location` e PEV criado. |
-| Consultar próprio PEV | `GET /api/v1/pevs/me` | Responsável autenticado. `200`; definir representação quando ainda não existe. |
-| Reapresentar PEV rejeitado | `POST /api/v1/pevs/me/resubmissions` | Mesmo responsável; altera o PEV `REJECTED` para `PENDING`, sem criar outro. |
-| Alterar endereço próprio | `PATCH /api/v1/pevs/me/address` | Proprietário autenticado; somente PEV `PENDING` ou `REJECTED`. |
-| Localizar PEVs | `GET /api/v1/pevs` | Público; somente `APPROVED`, com endereço do ponto e coordenadas disponíveis. Filtros, limites e consulta geográfica pendentes. |
+| Consultar próprio PEV | `GET /api/v1/pevs/me` | Responsável ativo. `200` com o próprio ponto; `404` quando ausente. |
+| Reapresentar PEV rejeitado | Proposta: `POST /api/v1/pevs/me/resubmissions` | **Não implementada.** Mesmo responsável; transição `REJECTED → PENDING`. |
+| Alterar endereço próprio | Proposta: `PATCH /api/v1/pevs/me/address` | **Não implementada.** Proprietário; somente `PENDING` ou `REJECTED`. |
+| Localizar PEVs | `GET /api/v1/pevs` | Público; somente `APPROVED`, com endereço e coordenadas disponíveis. Paginação 0/20, máximo 100; busca geográfica pendente. |
 | Listar/detalhar PEVs para gestão | `GET /api/v1/admin/pevs` e `GET /api/v1/admin/pevs/{id}` | ADMIN; fila, estados e detalhe autorizado, com paginação na lista. |
-| Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN; somente transições aprovadas. `200` com estado atualizado ou `204`, a decidir. |
+| Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo; transições administrativas permitidas. `200` com detalhe atualizado. |
 | Identificar cidadão por QR | `POST /api/v1/qr/resolutions` | Responsável ativo por PEV `APPROVED`; token no corpo, identificação mínima do cidadão ativo. A leitura não altera o token nem registra entrega. |
 | Registrar ou recuperar entrega | `POST /api/v1/pevs/{id}/deliveries` | Responsável autenticado do PEV; criação exige PEV aprovado e QR vigente. Recuperação por chave de entrega já confirmada segue a seção de idempotência. `201` na criação e `200` na recuperação, sob bloqueio transacional por chave interna. |
-| Histórico próprio | `GET /api/v1/users/me/deliveries` | Cidadão beneficiário; `200` paginado. |
+| Histórico próprio | Proposta: `GET /api/v1/users/me/deliveries` | **Não implementada.** Movimentações de pontos não substituem histórico completo de entregas. |
 | Entregas do PEV | `GET /api/v1/pevs/{id}/deliveries` | Responsável ativo do PEV; ID e nome do beneficiário, sem documento, contato ou QR. `page=0`, `size=20` por padrão, máximo 100; ordem `createdAt DESC, id DESC`. |
 | Detalhe da entrega | `GET /api/v1/pevs/{id}/deliveries/{deliveryId}` | Responsável ativo do PEV; consulta o recurso indicado pelo `Location` da criação. Entrega de outro PEV retorna `404`. |
 | Listar/detalhar entregas para gestão | `GET /api/v1/admin/deliveries` e `GET /api/v1/admin/deliveries/{id}` | ADMIN; lista paginada e detalhe, incluindo estado e revisão vigentes. |
 | Pontos próprios | `GET /api/v1/users/me/points` | Cidadão titular; saldo geral e movimentações vigentes de entregas, paginadas por `deliveryDate DESC, id DESC`. `page=0`, `size=20` por padrão, máximo 100. O recorte anual do ranking não compõe esta resposta. |
-| Corrigir/anular/restaurar | `POST /api/v1/admin/deliveries/{id}/corrections` | ADMIN; motivo e revisão esperada. `ANNULLED` anula sem mudar volume/data; `RECORDED` corrige ou restaura. `200` com revisão resultante proposto. |
+| Corrigir/anular/restaurar | `POST /api/v1/admin/deliveries/{id}/corrections` | ADMIN ativo; motivo e revisão esperada. `ANNULLED` preserva volume/data; `RECORDED` corrige ou restaura. `200` com detalhe e cálculo vigentes. |
 
-### Formatos de entrada propostos
+### Formatos de entrada implementados
 
-Campos não listados são rejeitados pelo comportamento JSON atual. Os exemplos são ilustrativos; nomes finais e respostas ainda requerem aprovação.
+Campos desconhecidos são rejeitados pelo comportamento JSON atual. Os exemplos usam os campos implementados; substitua IDs, tokens e datas pelos valores da operação.
 
 ```jsonc
 // POST /api/v1/pevs
@@ -105,12 +105,12 @@ Com a mesma chave e o mesmo validador, PEV, volume ou `deliveryDate` diferentes 
 
 Para `ANNULLED`, o contrato não permite editar volume ou data; o DTO deve rejeitar esses campos nessa operação. A procedure preserva os valores anteriores e zera o efeito vigente. `RECORDED` permite correção ou restauração de uma anulada, com justificativa, revisão esperada e recálculo. O volume deve ser positivo e a data não pode superar a criação original. `correctedBy`, pontos e nova revisão são gerados no servidor/banco.
 
-### Formatos de saída a fechar
+### Formatos de saída implementados
 
 - **PEV:** `id`, `status`, `address`, `createdAt`; `approvedAt` e dados de responsável somente conforme contexto. A localização pública mostra endereço próprio e coordenadas disponíveis apenas de PEVs aprovados, sem dados pessoais adicionais.
 - **Entrega:** `id`, `pevId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`, `recordStatus`, `revision`. O histórico do PEV deve usar identificador/dados mínimos do beneficiário aprovados para esse contexto.
 - **Pontos:** `balance` geral e movimentações atuais, sem somar revisões antigas. Pontuação anual de ranking não é sinônimo de saldo geral.
-- **Paginação:** a listagem pública de PEVs tem contrato inicial abaixo; as demais listas ainda precisam de tamanho, filtros, ordenação e formato final definidos.
+- **Paginação:** listas usam `items`, `page`, `size` e `totalElements`; pontos usa `movements` e acrescenta `balance`. Padrões 0/20, máximo 100. PEVs ordenam por `createdAt ASC, id ASC`; entregas por `createdAt DESC, id DESC`; pontos por `deliveryDate DESC, id DESC`.
 
 ### Primeira entrega: solicitação e consultas de PEV
 
@@ -163,12 +163,12 @@ Os testes das próximas PRs devem usar `OfficialPostgres`, a role limitada e req
 
 | Decisão | Impacta |
 | --- | --- |
-| Formatos finais de respostas, paginação, filtros, ordenação e limites. | REST e consultas |
+| Representações das capacidades ainda sem endpoint e futuros filtros adicionais. As listas implementadas seguem os formatos e limites da seção 4. | REST e consultas futuras |
 | Contrato da consulta geográfica do mapa. | Localização pública |
 | Forma de apresentar ao Mobile a identidade e situação do PEV do titular, sem confundir `is_pev` com permissão para solicitar coleta B2B. | Mobile e PEV |
 | Conferência da fixture SQL com a revisão oficial do banco necessária à implementação. | Testes e integração SQL |
-| Detalhe da identificação mínima retornada na resolução do QR e formato de apresentação do próprio QR, em alinhamento com B2B e com `GET /users/me`. | QR |
+| Apresentação visual do QR no aplicativo e eventual substituição excepcional. O perfil já retorna `qrToken` e a identificação retorna ID e nome. | QR e Mobile |
 | Detalhes administrativos de representação e histórico de revisões sem SELECT direto nos logs pela role da API. | Gestão e correção |
 | Contrato de leitura restrita da pontuação consolidada pelo Redis, inclusive recorte anual e atualizações após correção, sem publicação HTTP por operação pela Core. | Sprint 5 |
 
-**Critério para encerrar esta branch:** regras aprovadas registradas sem confundi-las com nomes finais de rotas ou formatos pendentes. Decisões que alterem contratos consumidos por Mobile/Frontend, estrutura ou permissões do banco, ou regras de negócio devem ser alinhadas com os respectivos responsáveis. Escolhas técnicas internas seguem os contratos acima.
+**Critério da integração:** validar e documentar a jornada disponível, mantendo explícitas as capacidades ainda não implementadas. Decisões que alterem contratos consumidos por Mobile/Frontend, estrutura ou permissões do banco, ou regras de negócio devem ser alinhadas com os respectivos responsáveis. Escolhas técnicas internas seguem os contratos acima.

@@ -7,6 +7,7 @@ import br.com.olius.olius_core_api.security.Caller;
 import br.com.olius.olius_core_api.service.DeliveryAdministrationService;
 import br.com.olius.olius_core_api.service.DeliveryCorrectionService;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Operation;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -31,17 +32,20 @@ public class DeliveryAdministrationController {
     }
 
     @GetMapping
+    @Operation(summary="Listar entregas para gestão administrativa")
     public Page list(@RequestParam(required=false) String page,
                      @RequestParam(required=false) String size,Authentication authentication) {
         return service.list(Caller.id(authentication),PevPagination.page(page),PevPagination.size(size));
     }
 
     @GetMapping("/{id}")
+    @Operation(summary="Consultar detalhe administrativo de entrega")
     public Detail detail(@PathVariable UUID id,Authentication authentication) {
         return service.detail(Caller.id(authentication),id);
     }
 
     @PostMapping("/{id}/corrections")
+    @Operation(summary="Corrigir, anular ou restaurar entrega B2C")
     public Detail correct(@PathVariable UUID id,@Valid @RequestBody Correction input,
                           Authentication authentication) {
         return corrections.change(id,Caller.id(authentication),input);
