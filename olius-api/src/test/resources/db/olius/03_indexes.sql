@@ -221,3 +221,8 @@ CREATE INDEX idx_admin_invitation_author ON public.admin_invitation(invited_by) 
 CREATE INDEX idx_admin_invitation_accepted_user ON public.admin_invitation(accepted_user_id) WHERE accepted_user_id IS NOT NULL;
 CREATE INDEX idx_admin_invitation_revoker ON public.admin_invitation(revoked_by) WHERE revoked_by IS NOT NULL;
 -- END ADMIN_MANAGEMENT
+
+-- A consulta de revisões filtra todas as associações de uma coleta por janela
+-- temporal. O índice por motivo não permite buscar diretamente essa faixa.
+CREATE INDEX idx_collection_failure_log_revision_window
+    ON public.collection_failure_log (collection_id, performed_at);
