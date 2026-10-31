@@ -102,6 +102,54 @@ class PevIntegrationTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.qrToken").value(qr));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void ownerJourneyRequiresApprovalForNewDeliveriesAndPreservesHistoryAfterInactivation(boolean company)
+            throws Exception {
+        var owner=company ? establishment() : citizen();
+        var beneficiary=citizen();var outsider=citizen();
+        String access=login(owner.email()),otherAccess=login(outsider.email());
+        var actor=activeAdmin();
+        var profile=mvc.perform(get("/api/v1/users/me").header("Authorization","Bearer "+login(beneficiary.email())))
+            .andExpect(status().isOk()).andReturn();
+        String qr=json.readTree(profile.getResponse().getContentAsString()).get("qrToken").asText();
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PENDING")).andReturn();
+        UUID pev=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pev);
+        String deliveries="/api/v1/pevs/"+pev+"/deliveries";
+        String identification=json.writeValueAsString(Map.of("qrToken",qr));
+        for(String state:List.of("PENDING","APPROVED","INACTIVE")) {
+            if(!state.equals("PENDING"))
+                mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                        "/api/v1/admin/pevs/{id}/status",pev).header("Authorization","Bearer "+actor.access())
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("status",state))))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.status").value(state));
+            mvc.perform(get("/api/v1/pevs/me").header("Authorization","Bearer "+access))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(pev.toString()))
+                .andExpect(jsonPath("$.status").value(state));
+            var identify=mvc.perform(post("/api/v1/qr/resolutions").header("Authorization","Bearer "+access)
+                .contentType(MediaType.APPLICATION_JSON).content(identification));
+            String input=deliveryRequest(UUID.randomUUID(),qr,"2.50",java.time.Instant.now().minusSeconds(60));
+            var record=mvc.perform(post(deliveries).header("Authorization","Bearer "+access)
+                .contentType(MediaType.APPLICATION_JSON).content(input));
+            if(state.equals("APPROVED")) {
+                identify.andExpect(status().isOk()).andExpect(jsonPath("$.id").value(beneficiary.id().toString()));
+                var result=record.andExpect(status().isCreated()).andReturn();
+                mvc.perform(get(result.getResponse().getHeader("Location"))
+                    .header("Authorization","Bearer "+access)).andExpect(status().isOk());
+            } else {
+                identify.andExpect(status().isForbidden());record.andExpect(status().isForbidden());
+            }
+        }
+        mvc.perform(get(deliveries).header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items[0].citizenId").value(beneficiary.id().toString()));
+        mvc.perform(get(deliveries).header("Authorization","Bearer "+otherAccess))
+            .andExpect(status().isForbidden());
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
