@@ -18,22 +18,32 @@ public class DeliveryCorrectionErrors {
         var seen=Collections.newSetFromMap(new IdentityHashMap<Throwable,Boolean>());
         for(Throwable cause=failure;cause!=null && seen.add(cause);cause=cause.getCause()) {
             if(cause instanceof SQLException sql) {
-                var chain=Collections.newSetFromMap(new IdentityHashMap<SQLException,Boolean>());
-                for(SQLException item=sql;item!=null && chain.add(item);item=item.getNextException()) {
-                    if(item instanceof PSQLException pg && pg.getServerErrorMessage()!=null
-                            && "exec_stmt_raise".equals(pg.getServerErrorMessage().getRoutine())) {
-                        RuntimeException translated=switch(item.getSQLState()) {
-                            case "22023" -> new BusinessRuleException(BusinessRuleException.Reason.INCONSISTENT_DATA);
-                            case "42501" -> new AccessDeniedException("Correção não autorizada");
-                            case "P0002" -> new ResourceNotFoundException();
-                            case "40001" -> new OptimisticLockingFailureException("Revisão desatualizada",item);
-                            default -> null;
-                        };
-                        if(translated!=null) return translated;
-                    }
-                }
+                var translated=translateChain(sql);
+                if(translated!=null) return translated;
             }
         }
         return failure;
+    }
+
+    private RuntimeException translateChain(SQLException sql) {
+        var seen=Collections.newSetFromMap(new IdentityHashMap<SQLException,Boolean>());
+        for(SQLException item=sql;item!=null && seen.add(item);item=item.getNextException()) {
+            if(item instanceof PSQLException pg && pg.getServerErrorMessage()!=null
+                    && "exec_stmt_raise".equals(pg.getServerErrorMessage().getRoutine())) {
+                var translated=translateBusinessError(item);
+                if(translated!=null) return translated;
+            }
+        }
+        return null;
+    }
+
+    private RuntimeException translateBusinessError(SQLException sql) {
+        return switch(sql.getSQLState()) {
+            case "22023" -> new BusinessRuleException(BusinessRuleException.Reason.INCONSISTENT_DATA);
+            case "42501" -> new AccessDeniedException("Correção não autorizada");
+            case "P0002" -> new ResourceNotFoundException();
+            case "40001" -> new OptimisticLockingFailureException("Revisão desatualizada",sql);
+            default -> null;
+        };
     }
 }
