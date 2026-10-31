@@ -1,6 +1,7 @@
 package br.com.olius.olius_core_api.repository;
 
 import br.com.olius.olius_core_api.dto.DeliveryContracts.View;
+import br.com.olius.olius_core_api.dto.DeliveryContracts.PevItem;
 import br.com.olius.olius_core_api.entity.enums.RecordStatus;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -66,6 +67,24 @@ public class DeliveryRepository {
                 rs.getLong("points_earned"),RecordStatus.valueOf(rs.getString("record_status")),
                 rs.getInt("revision"),rs.getLong("balance_after")),id,validator)
             .stream().findFirst();
+    }
+
+    public long countForPev(UUID pevId) {
+        return jdbc.queryForObject("SELECT count(*) FROM public.delivery_pev WHERE pev_id=?",Long.class,pevId);
+    }
+
+    public java.util.List<PevItem> pageForPev(UUID pevId,int size,long offset) {
+        return jdbc.query("""
+            SELECT d.id,d.citizen_id,u.name AS citizen_name,d.oil_volume_liters,
+                   d.delivery_date,d.created_at,d.points_earned,d.record_status,d.revision
+            FROM public.delivery_pev d JOIN public.users u ON u.id=d.citizen_id
+            WHERE d.pev_id=? ORDER BY d.created_at DESC,d.id DESC LIMIT ? OFFSET ?
+            """,(rs,row)->new PevItem(rs.getObject("id",UUID.class),
+                rs.getObject("citizen_id",UUID.class),rs.getString("citizen_name"),
+                rs.getBigDecimal("oil_volume_liters"),time(rs.getTimestamp("delivery_date")),
+                time(rs.getTimestamp("created_at")),rs.getLong("points_earned"),
+                RecordStatus.valueOf(rs.getString("record_status")),rs.getInt("revision")),
+            pevId,size,offset);
     }
 
     private static Instant time(Timestamp value) { return value.toInstant(); }

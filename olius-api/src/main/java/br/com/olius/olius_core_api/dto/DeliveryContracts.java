@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Pattern;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 import br.com.olius.olius_core_api.entity.enums.RecordStatus;
 
 public final class DeliveryContracts {
@@ -34,4 +35,10 @@ public final class DeliveryContracts {
     public record View(UUID id, UUID pevId, UUID citizenId, BigDecimal oilVolumeLiters,
         Instant deliveryDate, Instant createdAt, long pointsEarned, RecordStatus recordStatus,
         int revision, long balanceAfter) { }
+    public record PevItem(UUID id, UUID citizenId, String citizenName, BigDecimal oilVolumeLiters,
+        Instant deliveryDate, Instant createdAt, long pointsEarned, RecordStatus recordStatus,
+        int revision) { }
+    public record PevPage(List<PevItem> items, int page, int size, long totalElements) {
+        public PevPage { items=List.copyOf(items); }
+    }
 }

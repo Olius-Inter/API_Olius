@@ -2,6 +2,7 @@ package br.com.olius.olius_core_api.service;
 
 import br.com.olius.olius_core_api.dto.DeliveryContracts.Record;
 import br.com.olius.olius_core_api.dto.DeliveryContracts.View;
+import br.com.olius.olius_core_api.dto.DeliveryContracts.PevPage;
 import br.com.olius.olius_core_api.entity.enums.UserStatus;
 import br.com.olius.olius_core_api.entity.enums.UserType;
 import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
@@ -85,4 +86,14 @@ public class DeliveryService {
     }
 
     public record Result(View delivery,boolean created) { }
+
+    @Transactional(readOnly=true)
+    public PevPage listForPev(UUID pevId,UUID validator,UserType actorType,int page,int size) {
+        requireValidatorAndPev(pevId,validator,actorType);
+        long offset=(long)page*size;
+        if(offset>Integer.MAX_VALUE)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Página fora do limite");
+        return new PevPage(deliveries.pageForPev(pevId,size,offset),page,size,
+            deliveries.countForPev(pevId));
+    }
 }
