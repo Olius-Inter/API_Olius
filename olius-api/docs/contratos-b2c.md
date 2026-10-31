@@ -134,6 +134,16 @@ Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `own
 
 A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e será implementada no fluxo próprio.
 
+### Gestão administrativa de entregas implementada
+
+`GET /api/v1/admin/deliveries` exige ADMIN ativo e retorna `items`, `page`, `size` e `totalElements`, incluindo entregas registradas e anuladas. Padrões: `page=0`, `size=20`, máximo 100; ordem `createdAt DESC, id DESC`. Parâmetros vazios, inválidos ou deslocamento acima de `Integer.MAX_VALUE` retornam `400`. Página além do total retorna `200`, lista vazia e total preservado.
+
+`GET /api/v1/admin/deliveries/{id}` retorna `delivery`, `balanceAfter` e `calculatedAt` do cálculo vigente; ausência retorna `404`. `delivery` inclui identificação mínima do cidadão, PEV, validador, volume, datas, pontos, estado e revisão. Não inclui QR, documento ou contato.
+
+`POST /api/v1/admin/deliveries/{id}/corrections` exige ADMIN ativo e retorna `200` nesse mesmo formato após a alteração. Aceita `RECORDED → RECORDED`, `RECORDED → ANNULLED` e `ANNULLED → RECORDED`. Exige revisão positiva e justificativa não vazia de até 1000 caracteres. Para anular, volume e data devem estar ausentes ou nulos; seus valores anteriores são preservados. Para corrigir ou restaurar, ambos são obrigatórios: volume entre `0.01` e `999.99`, com até duas casas decimais, e data não futura nem posterior à criação original.
+
+Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entrega já anulada com revisão atual retorna `409 BUSINESS_STATE_CONFLICT`. Data posterior à criação original retorna `422 BUSINESS_RULE_VIOLATION`. Campos inválidos retornam `400`. A alteração, auditoria e reconstrução dos pontos ocorrem na mesma transação, sem repetição automática. Após timeout, consultar o detalhe antes de decidir por novo envio. A resposta mostra os efeitos vigentes; não representa o histórico completo de auditoria.
+
 ## 5. Autorização e transações
 
 1. Toda escrita abre transação, deriva a identidade do Bearer, verifica perfil e titularidade e chama `AuditContext.user` antes da alteração.
