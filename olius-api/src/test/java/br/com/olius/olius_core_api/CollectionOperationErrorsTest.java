@@ -23,6 +23,28 @@ class CollectionOperationErrorsTest {
     void recordFactFailuresAreBusinessValidation(String state) {
         assertThat(((BusinessRuleException)errors.translate(failure(state,"exec_stmt_raise"),Operation.RECORD)).getCode()).isEqualTo(ApiErrorCode.BUSINESS_RULE_VIOLATION);
     }
+    @ParameterizedTest @ValueSource(strings={"22023","23514","23503"})
+    void correctionFactFailuresAreBusinessValidation(String state) {
+        var translated=(BusinessRuleException)errors.translate(failure(state,"exec_stmt_raise"),Operation.CORRECTION);
+        assertThat(translated.getCode()).isEqualTo(ApiErrorCode.BUSINESS_RULE_VIOLATION);
+    }
+    @Test void correctionDoesNotHideConcurrencyOrRealPermissionFailures() {
+        var conflict=failure("40001","exec_stmt_raise");
+        var permission=failure("42501","aclcheck_error");
+        assertThat(errors.translate(conflict,Operation.CORRECTION)).isSameAs(conflict);
+        assertThat(errors.translate(permission,Operation.CORRECTION)).isSameAs(permission);
+    }
+    @Test void historyIntegrityFailureIsInternalAndNeverAnEmptyResultOrStateConflict() {
+        var failure=failure("55000","exec_stmt_raise");
+        assertThat(errors.translate(failure,Operation.HISTORY)).isInstanceOf(IllegalStateException.class)
+            .hasMessageNotContaining("private").hasCause(failure.getSQLException());
+        var denied=failure("42501","exec_stmt_raise");
+        assertThat(errors.translate(denied,Operation.HISTORY)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        var acl=failure("42501","aclcheck_error");
+        assertThat(errors.translate(acl,Operation.HISTORY)).isSameAs(acl);
+        var missing=failure("P0002","exec_stmt_raise");
+        assertThat(errors.translate(missing,Operation.HISTORY)).isInstanceOf(ResourceNotFoundException.class);
+    }
     @Test void doesNotTurnRealPrivilegeOrUnknownFailuresIntoClientErrors() {
         for(String state:new String[]{"42501","23503","23514","08006","XXXXX"}) {
             var failure=failure(state,"aclcheck_error");assertThat(errors.translate(failure,Operation.RECORD)).isSameAs(failure);

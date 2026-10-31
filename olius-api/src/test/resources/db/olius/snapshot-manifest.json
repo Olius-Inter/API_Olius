@@ -1,6 +1,6 @@
 {
   "source": "DB_Segundo/PostgreSQL",
-  "reviewed_at": "2026-10-29",
+  "reviewed_at": "2026-10-31",
   "files": [
     {
       "file": "01_structure.sql",
@@ -14,13 +14,13 @@
     },
     {
       "file": "03_indexes.sql",
-      "sha256": "b50cc9ffb91f47779132ad454b2a08e75a7fc3e6ee6b2fca9bf964a9eaea92fb",
-      "source_sha256": "beb34aa1a7f55633b0dd75b965da39ca8df9a3cfa217d495e815d38aad467adb"
+      "sha256": "88d06ed6a88eb6ddc64b1ec4f64355307dcbd1ccbefba8d57812c62587854f56",
+      "source_sha256": "17a8a028ad7689ceddbd80ee0f78dccb25eabdac1a8da5045d35513bb35f3212"
     },
     {
       "file": "04_functions_procedures.sql",
-      "sha256": "80908e323c9349981d1eb6cf186278f7cd851638742c5409109e367f8cd2a986",
-      "source_sha256": "4c3f2670204cc59395457968d2766eb6e37b542c504f3672d9e87afddae15043"
+      "sha256": "ebf3d699f879aeec12c3f82d3d530fb96e3b222aea45ff47742c20bb8864194e",
+      "source_sha256": "c4f4aa7cfce460960fac67901c8dc93aeeff9394f59d891296e1f66543ff069a"
     },
     {
       "file": "05_triggers.sql",
@@ -44,8 +44,8 @@
     },
     {
       "file": "access_control/01_roles.sql",
-      "sha256": "ec0842c2a1141fff8579b0a4919e3d3cea62cac9fec8cf063e542f66384fcfc4",
-      "source_sha256": "381e0910441f0ddc614221bd46e6aed909f4494849fda72b83c234bfe058522c"
+      "sha256": "77934cd7869c3f42604595d11bc1fa3fc72a23400a800a9a37da6b190783fffe",
+      "source_sha256": "50d6167d356ba5321e656c2ca78aaa7883ac47f1d50658bacf08f1b2a508dadc"
     },
     {
       "file": "data_catalog/01_structure.sql",

@@ -493,7 +493,8 @@ BEGIN
         'apply_verified_payment','create_collection_request','schedule_collection_request',
         'cancel_collection_request','record_collection','record_collection_internal','record_failed_collection_visit','record_pev_delivery','correct_collection','correct_pev_delivery',
         'fn_olius_audit_trigger','fn_olius_sync_establishment_is_pev',
-        'record_collection_arrival','accept_collection_service','reject_collection_request','set_billing_charge_external_status'] LOOP
+        'record_collection_arrival','accept_collection_service','reject_collection_request','set_billing_charge_external_status',
+        'get_collection_revision_history'] LOOP
         SELECT count(*) INTO matches FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
             WHERE n.nspname='public' AND p.proname=name;
         IF matches <> 1 THEN RAISE EXCEPTION 'Rotina % ausente ou com sobrecarga não revisada.',name; END IF;
@@ -513,7 +514,9 @@ BEGIN
         EXECUTE format('ALTER %s public.%I(%s) SET search_path = pg_catalog, public, pg_temp',kind,name,r.args);
         EXECUTE format('REVOKE ALL ON %s public.%I(%s) FROM PUBLIC, olius_api, olius_owner RESTRICT',kind,name,r.args);
         IF name NOT IN ('fn_olius_audit_trigger','fn_olius_sync_establishment_is_pev','record_collection_internal') THEN
-            EXECUTE format('GRANT EXECUTE ON %s public.%I(%s) TO olius_owner',kind,name,r.args);
+            IF name <> 'get_collection_revision_history' THEN
+                EXECUTE format('GRANT EXECUTE ON %s public.%I(%s) TO olius_owner',kind,name,r.args);
+            END IF;
             IF NOT internal THEN EXECUTE format('GRANT EXECUTE ON %s public.%I(%s) TO olius_api',kind,name,r.args); END IF;
         END IF;
     END LOOP;
