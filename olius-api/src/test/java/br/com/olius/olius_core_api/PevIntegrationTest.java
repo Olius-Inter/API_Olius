@@ -537,7 +537,16 @@ class PevIntegrationTest {
         var beneficiary=citizen();
         var otherBeneficiary=citizen();
         String access=login(validator.email());
-        UUID pevId=approvedDeliveryPev(validator,access);
+        var actor=activeAdmin();
+        var requested=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isCreated()).andReturn();
+        UUID pevId=UUID.fromString(json.readTree(requested.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pevId);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                "/api/v1/admin/pevs/{id}/status",pevId).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"APPROVED\"}"))
+            .andExpect(status().isOk());
         String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
             String.class,beneficiary.id());
         String otherQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",
@@ -549,7 +558,10 @@ class PevIntegrationTest {
             .contentType(MediaType.APPLICATION_JSON).content(deliveryRequest(key,qr,"2.50",date)))
             .andExpect(status().isCreated()).andReturn();
         String deliveryId=json.readTree(first.getResponse().getContentAsString()).get("id").asText();
-        admin().update("UPDATE pev SET status='INACTIVE' WHERE id=?",pevId);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                "/api/v1/admin/pevs/{id}/status",pevId).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"INACTIVE\"}"))
+            .andExpect(status().isOk());
         String retry=json.writeValueAsString(Map.of("idempotencyKey",key,
             "oilVolumeLiters",new java.math.BigDecimal("2.50"),"deliveryDate",date));
         mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
@@ -570,6 +582,21 @@ class PevIntegrationTest {
             .content(json.writeValueAsString(Map.of("idempotencyKey",key,
                 "oilVolumeLiters",new java.math.BigDecimal("3.00"),"deliveryDate",date))))
             .andExpect(status().isConflict());
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(key,qr,"2.50",date.minusSeconds(60))))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("RESOURCE_CONFLICT"));
+        mvc.perform(get(first.getResponse().getHeader("Location"))
+            .header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(deliveryId));
+        mvc.perform(get("/api/v1/users/me/points").header("Authorization","Bearer "+login(beneficiary.email())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(2))
+            .andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.movements[0].deliveryId").value(deliveryId));
+        mvc.perform(post(endpoint).header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(deliveryRequest(UUID.randomUUID(),qr,"2.50",date)))
+            .andExpect(status().isForbidden()); // Nova chave não recupera a operação antiga.
         assertThat(admin().queryForObject("SELECT count(*) FROM delivery_pev WHERE idempotency_key=?",
             Long.class,br.com.olius.olius_core_api.service.DeliveryKeys.internal(validator.id(),key)))
             .isEqualTo(1);
