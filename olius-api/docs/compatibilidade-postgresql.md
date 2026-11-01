@@ -80,3 +80,8 @@ sem aplicar CREATEs ou limpar dados automaticamente.
 Os bloqueios de código e compatibilidade levantados na auditoria foram tratados.
 A Sprint 8 não foi implementada. Seu próximo passo é retomar o desenho dos endpoints
 sobre as rotinas de reserva, agenda e cancelamento já definidas.
+
+
+## Recuperação de senha — 01/11/2026
+
+Snapshot atualizado para DB_Segundo feat/password-reset, commit 7e6ed3c. Login exige open_auth_session(uuid,bytea,text); o contrato anterior é incompatível. Migração oficial permanece no repositório do banco e não é aplicada automaticamente pela Core. Ver [recuperacao-de-senha.md](recuperacao-de-senha.md) para implantação coordenada, permissões e pendências.
