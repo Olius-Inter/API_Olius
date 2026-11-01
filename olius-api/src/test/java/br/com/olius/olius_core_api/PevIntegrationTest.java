@@ -208,6 +208,159 @@ class PevIntegrationTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "false,PENDING", "false,REJECTED", "false,APPROVED", "false,INACTIVE",
+        "true,PENDING", "true,REJECTED", "true,APPROVED", "true,INACTIVE"
+    })
+    void ownerEditsOnlyPendingOrRejectedPevAddress(boolean company,String state) throws Exception {
+        var account=company ? establishment() : citizen();String access=login(account.email());
+        var result=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated()).andReturn();
+        UUID pev=UUID.fromString(json.readTree(result.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pev);
+        UUID address=admin().queryForObject("SELECT address_id FROM pev WHERE id=?",UUID.class,pev);
+        String commercial=company ? admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,account.id()) : null;
+        var actor=activeAdmin();
+        if(!state.equals("PENDING"))
+            admin().update("UPDATE pev SET status=CAST(? AS approval_status_t),approved_by=?,approved_at=clock_timestamp() WHERE id=?",state,actor.id(),pev);
+        String before=admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a WHERE id=?",String.class,address);
+        long logs=admin().queryForObject("SELECT count(*) FROM addresses_log WHERE id=?",Long.class,address);
+        var edited=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/pevs/me/address")
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(request().replace("Rua do PEV","Rua atualizada")));
+        if(state.equals("PENDING") || state.equals("REJECTED")) {
+            edited.andExpect(status().isOk()).andExpect(jsonPath("$.id").value(pev.toString()))
+                .andExpect(jsonPath("$.status").value(state)).andExpect(jsonPath("$.address.id").value(address.toString()))
+                .andExpect(jsonPath("$.address.street").value("Rua atualizada"));
+            assertThat(admin().queryForObject("SELECT count(*) FROM addresses_log WHERE id=? AND performed_by=? AND operation='UPDATE'",Long.class,address,account.id())).isEqualTo(2);
+        } else {
+            edited.andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUSINESS_STATE_CONFLICT"));
+            assertThat(admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a WHERE id=?",String.class,address)).isEqualTo(before);
+            assertThat(admin().queryForObject("SELECT count(*) FROM addresses_log WHERE id=?",Long.class,address)).isEqualTo(logs);
+        }
+        assertThat(admin().queryForObject("SELECT address_id FROM pev WHERE id=?",UUID.class,pev)).isEqualTo(address);
+        if(company)
+            assertThat(admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,account.id())).isEqualTo(commercial);
+    }
+
+    @Test void addressEditingRejectsMissingPevInvalidInputsAndUnauthorizedAccounts() throws Exception {
+        String route="/api/v1/pevs/me/address";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isUnauthorized());
+        var account=citizen();String access=login(account.email());var actor=activeAdmin();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        for(String invalid:List.of("{}", "{\"address\":null}",request().replace("01001000","invalid"),
+                request().replaceFirst("\\}$",",\"status\":\"APPROVED\"}"),
+                request().replace("\"street\"","\"owner_kind\":\"ESTABLISHMENT\",\"street\"")))
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+                .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(invalid))
+                .andExpect(status().isBadRequest());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",account.id());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void rejectedPevResubmissionPreservesIdentityAndSerializesAttempts(boolean company) throws Exception {
+        var account=company ? establishment() : citizen();String access=login(account.email());
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated()).andReturn();
+        UUID pev=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
+        var before=admin().queryForMap("SELECT address_id,created_at,citizen_id,establishment_id FROM pev WHERE id=?",pev);
+        long addresses=admin().queryForObject("SELECT count(*) FROM addresses",Long.class);
+        var actor=activeAdmin();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                "/api/v1/admin/pevs/{id}/status",pev).header("Authorization","Bearer "+actor.access())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"REJECTED\"}"))
+            .andExpect(status().isOk());
+        String route="/api/v1/pevs/me/resubmissions";
+        var start=new CountDownLatch(1);
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Integer> attempt=()->{
+                start.await();return mvc.perform(post(route).header("Authorization","Bearer "+access))
+                    .andReturn().getResponse().getStatus();
+            };
+            var first=pool.submit(attempt);var second=pool.submit(attempt);start.countDown();
+            assertThat(List.of(first.get(30,TimeUnit.SECONDS),second.get(30,TimeUnit.SECONDS)))
+                .containsExactlyInAnyOrder(200,409);
+        }
+        mvc.perform(get("/api/v1/pevs/me").header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(pev.toString()))
+            .andExpect(jsonPath("$.status").value("PENDING"))
+            .andExpect(jsonPath("$.address.id").value(before.get("address_id").toString()));
+        assertThat(admin().queryForMap("SELECT address_id,created_at,citizen_id,establishment_id FROM pev WHERE id=?",pev))
+            .isEqualTo(before);
+        assertThat(admin().queryForObject("SELECT count(*) FROM addresses",Long.class)).isEqualTo(addresses);
+        assertThat(admin().queryForObject("SELECT count(*) FROM pev WHERE citizen_id=? OR establishment_id=?",Long.class,account.id(),account.id())).isEqualTo(1);
+        assertThat(admin().queryForObject("SELECT count(*) FROM pev_log WHERE id=? AND performed_by=? AND operation='UPDATE' AND audit_reason=?",
+            Long.class,pev,account.id(),"Reapresentação do PEV rejeitado pelo responsável")).isEqualTo(2);
+        mvc.perform(post(route).header("Authorization","Bearer "+access))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUSINESS_STATE_CONFLICT"));
+    }
+
+    @Test void resubmissionRejectsInvalidStatesMissingPevAndUnauthorizedAccounts() throws Exception {
+        String route="/api/v1/pevs/me/resubmissions";
+        mvc.perform(post(route)).andExpect(status().isUnauthorized());
+        var actor=activeAdmin();
+        mvc.perform(post(route).header("Authorization","Bearer "+actor.access())).andExpect(status().isForbidden());
+        var account=citizen();String access=login(account.email());
+        mvc.perform(post(route).header("Authorization","Bearer "+access)).andExpect(status().isNotFound());
+        UUID pev=approvedDeliveryPev(account,access);
+        for(String state:List.of("APPROVED","INACTIVE","PENDING")) {
+            admin().update("UPDATE pev SET status=CAST(? AS approval_status_t) WHERE id=?",state,pev);
+            mvc.perform(post(route).header("Authorization","Bearer "+access))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUSINESS_STATE_CONFLICT"));
+            assertThat(admin().queryForObject("SELECT status::text FROM pev WHERE id=?",String.class,pev)).isEqualTo(state);
+        }
+        admin().update("UPDATE pev SET status='REJECTED' WHERE id=?",pev);
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",account.id());
+        mvc.perform(post(route).header("Authorization","Bearer "+access)).andExpect(status().isUnauthorized());
+        assertThat(admin().queryForObject("SELECT status::text FROM pev WHERE id=?",String.class,pev)).isEqualTo("REJECTED");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void ownerMaintainsRejectedPevAndAdministratorApprovesSamePoint(boolean company) throws Exception {
+        var account=company ? establishment() : citizen();String access=login(account.email());
+        var actor=activeAdmin();
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated()).andReturn();
+        var original=json.readTree(created.getResponse().getContentAsString());
+        String id=original.get("id").asText(),addressId=original.get("address").get("id").asText();
+        deliveryPevIds.add(UUID.fromString(id));
+        String decision="/api/v1/admin/pevs/"+id+"/status";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(decision)
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"REJECTED\"}")).andExpect(status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/pevs/me/address")
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(request().replace("Rua do PEV","Rua corrigida")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REJECTED"));
+        mvc.perform(post("/api/v1/pevs/me/resubmissions").header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id))
+            .andExpect(jsonPath("$.status").value("PENDING"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(decision)
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"APPROVED\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.address.street").value("Rua corrigida"));
+        mvc.perform(get("/api/v1/pevs/me").header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id))
+            .andExpect(jsonPath("$.status").value("APPROVED"))
+            .andExpect(jsonPath("$.createdAt").value(original.get("createdAt").asText()))
+            .andExpect(jsonPath("$.address.id").value(addressId))
+            .andExpect(jsonPath("$.address.street").value("Rua corrigida"));
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
@@ -842,9 +995,15 @@ class PevIntegrationTest {
         var correction=paths.get("/api/v1/admin/deliveries/{id}/corrections").get("post");
         assertThat(correction.get("summary").asText()).contains("restaurar");
         assertThat(correction.get("responses").has("409")).isTrue();
-        for(String absent:List.of("/api/v1/pevs/me/resubmissions","/api/v1/pevs/me/address",
-                "/api/v1/users/me/deliveries"))
-            assertThat(paths.has(absent)).isFalse();
+        assertThat(paths.has("/api/v1/users/me/deliveries")).isFalse();
+        for(var entry:Map.of("/api/v1/pevs/me/address","patch",
+                "/api/v1/pevs/me/resubmissions","post").entrySet()) {
+            var operation=paths.get(entry.getKey()).get(entry.getValue());
+            assertThat(operation.get("security").toString()).contains("bearer");
+            assertThat(operation.get("description").asText()).contains("409 BUSINESS_STATE_CONFLICT");
+            assertThat(operation.get("responses").has("200")).isTrue();
+            assertThat(operation.get("responses").has("409")).isTrue();
+        }
         var pevs=paths.get("/api/v1/pevs");
         assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
         assertThat(pevs.get("post").get("security").toString()).contains("bearer");

@@ -164,6 +164,10 @@ public class OpenApiConfiguration {
     }
 
     private String description(String path, PathItem.HttpMethod method) {
+        if(path.equals("/api/v1/pevs/me/address"))
+            return "Cidadão ou estabelecimento ativo edita somente o endereço do próprio PEV em PENDING ou REJECTED. Corpo: address completo no formato do cadastro; opcionais omitidos ficam nulos. Preserva ID do ponto, endereço, responsável e estado. Retorna 200 com o próprio PEV atualizado. Ausência de PEV retorna 404; estado incompatível retorna 409 BUSINESS_STATE_CONFLICT. Campos inválidos ou desconhecidos retornam 400. Auditoria e edição são transacionais.";
+        if(path.equals("/api/v1/pevs/me/resubmissions"))
+            return "Cidadão ou estabelecimento ativo reapresenta somente o próprio PEV REJECTED, sem corpo. Retorna 200 com o mesmo PEV em PENDING; preserva responsável, endereço e criação. Ausência de PEV retorna 404; outros estados, inclusive repetição, retornam 409 BUSINESS_STATE_CONFLICT. Bloqueio e auditoria transacionais impedem reapresentações simultâneas duplicadas. ADMIN não reapresenta em nome do titular.";
         if(path.equals("/api/v1/admin/deliveries/{id}/corrections"))
             return "ADMIN ativo corrige RECORDED, anula RECORDED ou restaura ANNULLED. expectedRevision positivo e reason de até 1000 caracteres obrigatórios. ANNULLED exige volume e data ausentes ou nulos e preserva os valores físicos. RECORDED exige volume de 0.01 a 999.99 litros com até duas casas e data não futura nem posterior à criação original. Retorna 200 com delivery, balanceAfter e calculatedAt atualizados. Auditoria, revisão e recálculo são atômicos. Revisão antiga ou estado incompatível retorna 409, sem repetição automática; dados incompatíveis com a criação original retornam 422.";
         if(path.equals("/api/v1/admin/deliveries"))

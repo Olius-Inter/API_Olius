@@ -9,5 +9,6 @@ public final class PevRequests {
     private PevRequests() { }
 
     public record Create(@NotNull @Valid AddressInput address) { }
+    public record UpdateAddress(@NotNull @Valid AddressInput address) { }
     public record StatusChange(@NotNull PevStatus status) { }
 }

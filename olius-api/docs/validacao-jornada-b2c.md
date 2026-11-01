@@ -39,6 +39,18 @@ pelo fluxo autorizado. Não use dados pessoais reais nos cenários de validaçã
 | 19 | Consultar entrega anterior pelo responsável ativo. | Acesso preservado ao histórico recebido; outro responsável recebe `403`. |
 | 20 | Inativar a conta do responsável e reutilizar a sessão antiga. | `401`; a exceção de recuperação não dispensa conta e sessão válidas. |
 
+## Manutenção do próprio PEV
+
+Repetir com responsável cidadão e estabelecimento: solicitar ponto, rejeitar pelo
+ADMIN, editar o endereço via PATCH, reapresentar via POST e aprovar pelo ADMIN.
+Conferir ID, data de criação e ID do endereço preservados e endereço corrigido no
+detalhe administrativo. Confirmar que editar não muda o estado e que reapresentar
+sem edição também funciona. O endereço comercial do estabelecimento deve permanecer igual.
+
+Editar em `APPROVED`/`INACTIVE` e reapresentar fora de `REJECTED` devem retornar
+`409 BUSINESS_STATE_CONFLICT`. Duas reapresentações simultâneas devem produzir
+um sucesso e um conflito, sem novo PEV ou endereço. Conferir auditoria com o titular.
+
 ## Paginação e falhas
 
 Nas consultas de entregas do PEV, entregas administrativas e pontos, criar pelo
@@ -62,8 +74,8 @@ Com Java 21 e Docker Desktop disponíveis, executar dentro de `olius-api`:
 ```
 
 O comando executa a suíte e gera o relatório JaCoCo em `target/site/jacoco`.
-Na verificação local de encerramento desta branch, em 31/10/2026, o comando
-concluiu com `BUILD SUCCESS`: 529 testes, zero falhas, zero erros e zero ignorados.
+Na verificação local da manutenção do próprio PEV, em 01/11/2026, o comando
+concluiu com `BUILD SUCCESS`: 545 testes, zero falhas, zero erros e zero ignorados.
 O Surefire registrou encerramento forçado do processo de testes após o prazo de
 30 segundos de desligamento; isso ocorreu após os testes e não impediu o build,
 o empacotamento ou a geração do relatório. O aviso permanece para acompanhamento
@@ -75,9 +87,8 @@ pelo Sonar no CI; um build local aprovado não substitui essa avaliação.
 
 ## Limites do aceite
 
-Este roteiro valida a jornada disponível. Não declara implementados reapresentação
-de PEV rejeitado, edição de endereço pelo titular, histórico próprio completo de
-entregas ou busca geográfica por distância/área. Essas capacidades estão registradas
+Este roteiro valida a jornada disponível. Não declara implementados histórico próprio
+completo de entregas ou busca geográfica por distância/área. Essas capacidades estão registradas
 no [inventário](jornada-b2c.md) para etapas próprias.
 
 A integração do ranking pela API Redis e a conferência da revisão oficial do banco

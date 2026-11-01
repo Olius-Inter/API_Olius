@@ -74,12 +74,30 @@ Solicitação duplicada retorna `409`; consulte o próprio PEV antes de oferecer
 | --- | --- |
 | `PENDING` | Solicitação aguardando decisão; identificação e novas entregas bloqueadas. |
 | `APPROVED` | Responsável pode identificar cidadãos e registrar entregas. |
-| `REJECTED` | Solicitação rejeitada; reapresentação e edição de endereço ainda não possuem rota. |
+| `REJECTED` | Permite editar o endereço e reapresentar o mesmo ponto para análise. |
 | `INACTIVE` | Identificação e novas entregas bloqueadas; entregas anteriores continuam consultáveis pelo responsável ativo. |
 
 A aprovação pertence ao ADMIN, por `PATCH /api/v1/admin/pevs/{id}/status`.
 O aplicativo consulta novamente `/pevs/me` para obter a situação atual.
 Ser responsável por PEV não concede acesso às operações de coleta B2B.
+
+### Corrigir e reapresentar o próprio ponto
+
+Em `PENDING` ou `REJECTED`, envie `PATCH /api/v1/pevs/me/address` com o mesmo
+formato `{"address":{...}}` da solicitação. Envie o endereço completo: campos
+obrigatórios não podem faltar; complemento e coordenadas omitidos ficam nulos.
+Sucesso retorna `200` com o mesmo PEV e endereço atualizados, sem mudar o estado.
+O endereço pessoal/comercial do responsável é preservado.
+
+Depois de corrigir um ponto rejeitado, envie `POST /api/v1/pevs/me/resubmissions`
+sem corpo. Retorna `200` com o mesmo PEV em `PENDING`. A edição não reapresenta
+automaticamente; as ações são independentes. Reapresentar sem editar também é permitido.
+Somente o próprio responsável ativo, cidadão ou estabelecimento, executa essas ações.
+
+Ausência de PEV retorna `404`. Editar `APPROVED`/`INACTIVE` ou reapresentar qualquer
+estado diferente de `REJECTED` retorna `409 BUSINESS_STATE_CONFLICT`.
+Após conflito ou perda da resposta, consulte `/pevs/me` antes de decidir nova ação.
+Não crie outra solicitação para substituir um ponto rejeitado.
 
 ## 4. Identificar o cidadão no atendimento
 
@@ -179,6 +197,5 @@ erros de validação podem incluir `errors`. Trate pelo status/código, não pel
 | `429` | Reduzir frequência e permitir nova tentativa posteriormente. |
 | `500` / `503` | Informar falha temporária; preservar os dados e a chave de entrega para recuperação. |
 
-Não apresentar reapresentação de PEV, edição do endereço ou
-`GET /api/v1/users/me/deliveries` como operações disponíveis.
+Não apresentar `GET /api/v1/users/me/deliveries` como operação disponível.
 Ranking pertence à integração com a API Redis; a Core não publica cada entrega por HTTP.

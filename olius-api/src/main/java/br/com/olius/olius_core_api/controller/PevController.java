@@ -1,11 +1,13 @@
 package br.com.olius.olius_core_api.controller;
 
 import br.com.olius.olius_core_api.dto.PevRequests.Create;
+import br.com.olius.olius_core_api.dto.PevRequests.UpdateAddress;
 import br.com.olius.olius_core_api.dto.PevResponses.OwnPev;
 import br.com.olius.olius_core_api.dto.PevResponses.PublicPage;
 import br.com.olius.olius_core_api.security.Caller;
 import br.com.olius.olius_core_api.service.PevService;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Operation;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -27,6 +29,18 @@ public class PevController {
     @GetMapping("/me")
     public OwnPev own(Authentication authentication) {
         return service.own(Caller.id(authentication),Caller.type(authentication));
+    }
+
+    @PatchMapping("/me/address")
+    @Operation(summary="Editar endereço do próprio PEV")
+    public OwnPev updateAddress(@Valid @RequestBody UpdateAddress request,Authentication authentication) {
+        return service.updateAddress(request,Caller.id(authentication),Caller.type(authentication));
+    }
+
+    @PostMapping("/me/resubmissions")
+    @Operation(summary="Reapresentar o próprio PEV rejeitado")
+    public OwnPev resubmit(Authentication authentication) {
+        return service.resubmit(Caller.id(authentication),Caller.type(authentication));
     }
 
     @GetMapping

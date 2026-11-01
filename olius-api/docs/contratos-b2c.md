@@ -39,8 +39,8 @@ As rotas abaixo estão implementadas, exceto as linhas marcadas como **não impl
 | --- | --- | --- |
 | Solicitar PEV | `POST /api/v1/pevs` | Cidadão/estabelecimento ativo; responsável do token. `201` com `Location` e PEV criado. |
 | Consultar próprio PEV | `GET /api/v1/pevs/me` | Responsável ativo. `200` com o próprio ponto; `404` quando ausente. |
-| Reapresentar PEV rejeitado | Proposta: `POST /api/v1/pevs/me/resubmissions` | **Não implementada.** Mesmo responsável; transição `REJECTED → PENDING`. |
-| Alterar endereço próprio | Proposta: `PATCH /api/v1/pevs/me/address` | **Não implementada.** Proprietário; somente `PENDING` ou `REJECTED`. |
+| Reapresentar PEV rejeitado | `POST /api/v1/pevs/me/resubmissions` | Titular ativo; sem corpo; `REJECTED → PENDING`, `200` com o mesmo PEV. |
+| Alterar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; somente `PENDING` ou `REJECTED`; `200` com o próprio PEV atualizado. |
 | Localizar PEVs | `GET /api/v1/pevs` | Público; somente `APPROVED`, com endereço e coordenadas disponíveis. Paginação 0/20, máximo 100; busca geográfica pendente. |
 | Listar/detalhar PEVs para gestão | `GET /api/v1/admin/pevs` e `GET /api/v1/admin/pevs/{id}` | ADMIN; fila, estados e detalhe autorizado, com paginação na lista. |
 | Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo; transições administrativas permitidas. `200` com detalhe atualizado. |
@@ -132,7 +132,7 @@ Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `own
 
 `PATCH /api/v1/admin/pevs/{id}/status` exige ADMIN ativo e recebe apenas `{"status":"APPROVED"}` (ou outro estado de destino). Permite `PENDING → APPROVED/REJECTED`, `APPROVED → INACTIVE` e `INACTIVE → APPROVED`; outras transições, inclusive repetição do mesmo estado e reapresentação de `REJECTED`, retornam `409`. ID inexistente retorna `404`. Sucesso retorna `200` com o detalhe atualizado do PEV.
 
-A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e será implementada no fluxo próprio.
+A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e é executada por POST /api/v1/pevs/me/resubmissions.
 
 ### Gestão administrativa de entregas implementada
 
@@ -145,6 +145,52 @@ A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approv
 Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entrega já anulada com revisão atual retorna `409 BUSINESS_STATE_CONFLICT`. Data posterior à criação original retorna `422 BUSINESS_RULE_VIOLATION`. Campos inválidos retornam `400`. A alteração, auditoria e reconstrução dos pontos ocorrem na mesma transação, sem repetição automática. Após timeout, consultar o detalhe antes de decidir por novo envio. A resposta mostra os efeitos vigentes; não representa o histórico completo de auditoria.
 
 ## 5. Autorização e transações
+
+### Contrato da manutenção do próprio PEV — implementação nesta task
+
+Task `86e3xq9ec`. As rotas desta seção estão implementadas e documentadas no OpenAPI.
+
+| Operação | Entrada | Sucesso |
+| --- | --- | --- |
+| `PATCH /api/v1/pevs/me/address` | `{"address":{...}}`, com `IdentityRequests.AddressInput` completo. | `200` com `PevResponses.OwnPev` atualizado. |
+| `POST /api/v1/pevs/me/resubmissions` | Sem corpo; identidade e ponto vêm da sessão. | `200` com o mesmo PEV em `PENDING`. |
+
+Ambas exigem conta ativa `CITIZENS` ou `ESTABLISHMENT`. O titular é derivado do
+Bearer; não recebem ID de PEV, responsável, aprovação ou estado no corpo.
+ADMIN não executa essas ações em nome do proprietário.
+
+A edição aceita somente `PENDING` ou `REJECTED`, sem alterar o estado. Embora a
+rota use PATCH, o objeto `address` representa a substituição completa dos campos
+editáveis: campos postais obrigatórios devem ser enviados; complemento e coordenadas
+podem ser nulos. Campos opcionais omitidos serão nulos, não preservados implicitamente.
+Reutilizar as validações do cadastro: UF com duas letras maiúsculas, CEP com oito
+dígitos, limites textuais existentes e faixas de latitude/longitude. Não introduzir
+novos campos ou regras geográficas. Preservar o ID do endereço, `owner_kind=PEV`,
+o vínculo `address_id` e o endereço pessoal/comercial do responsável.
+
+A reapresentação permite somente `REJECTED → PENDING`; preserva ID, responsável,
+endereço e data de criação, sem criar registros substitutos. Editar o endereço e
+reapresentar são ações separadas: a primeira não solicita nova análise automaticamente.
+Repetir a reapresentação quando o PEV já estiver `PENDING` retorna conflito.
+
+Cada escrita usa transação, localiza exclusivamente o ponto do titular e bloqueia
+a linha do PEV antes de conferir o estado. O bloqueio deve coordenar com a decisão
+administrativa existente, evitando editar um ponto que acaba de ser aprovado ou
+reapresentar duas vezes. Configurar `AuditContext.user` antes da alteração, com
+motivo definido pelo servidor. Auditoria e alteração devem confirmar ou reverter juntas.
+Após escrita, devolver a representação atualizada sem depender de entidade em cache.
+
+Erros: `400` para entrada inválida ou campos desconhecidos no endereço; `401` para
+sessão inválida/conta inativa no HTTP; `403` para perfil não autorizado; `404` quando
+o titular não possui PEV; `409 BUSINESS_STATE_CONFLICT` para estado incompatível.
+Não disponibilizar consulta ou alteração de ponto alheio por parâmetro fornecido pelo cliente.
+
+As permissões necessárias já constam em `access_control/01_roles.sql` da fixture:
+UPDATE dos campos editáveis de `addresses` e de `pev.status`. Não estão previstas
+mudanças de estrutura ou grants nesta task. Conferir o banco oficial antes da implantação.
+O aceite deverá cobrir os dois perfis, estados permitidos/bloqueados, auditoria,
+preservação de IDs e endereços independentes, decisões simultâneas e a jornada
+solicitação → rejeição → edição → reapresentação → aprovação por HTTP.
 
 1. Toda escrita abre transação, deriva a identidade do Bearer, verifica perfil e titularidade e chama `AuditContext.user` antes da alteração.
 2. Criação de PEV persiste endereço PEV e PEV na mesma transação. A unicidade do banco fecha corridas de duas solicitações.
