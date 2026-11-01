@@ -146,6 +146,53 @@ Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entr
 
 ## 5. Autorização e transações
 
+### Contrato da manutenção do próprio PEV — implementação nesta task
+
+Task `86e3xq9ec`. As rotas desta seção continuam pendentes até sua implementação;
+este contrato orienta os próximos commits, sem declarar disponibilidade no Mobile.
+
+| Operação | Entrada | Sucesso |
+| --- | --- | --- |
+| `PATCH /api/v1/pevs/me/address` | `{"address":{...}}`, com `IdentityRequests.AddressInput` completo. | `200` com `PevResponses.OwnPev` atualizado. |
+| `POST /api/v1/pevs/me/resubmissions` | Sem corpo; identidade e ponto vêm da sessão. | `200` com o mesmo PEV em `PENDING`. |
+
+Ambas exigem conta ativa `CITIZENS` ou `ESTABLISHMENT`. O titular é derivado do
+Bearer; não recebem ID de PEV, responsável, aprovação ou estado no corpo.
+ADMIN não executa essas ações em nome do proprietário.
+
+A edição aceita somente `PENDING` ou `REJECTED`, sem alterar o estado. Embora a
+rota use PATCH, o objeto `address` representa a substituição completa dos campos
+editáveis: campos postais obrigatórios devem ser enviados; complemento e coordenadas
+podem ser nulos. Campos opcionais omitidos serão nulos, não preservados implicitamente.
+Reutilizar as validações do cadastro: UF com duas letras maiúsculas, CEP com oito
+dígitos, limites textuais existentes e faixas de latitude/longitude. Não introduzir
+novos campos ou regras geográficas. Preservar o ID do endereço, `owner_kind=PEV`,
+o vínculo `address_id` e o endereço pessoal/comercial do responsável.
+
+A reapresentação permite somente `REJECTED → PENDING`; preserva ID, responsável,
+endereço e data de criação, sem criar registros substitutos. Editar o endereço e
+reapresentar são ações separadas: a primeira não solicita nova análise automaticamente.
+Repetir a reapresentação quando o PEV já estiver `PENDING` retorna conflito.
+
+Cada escrita usa transação, localiza exclusivamente o ponto do titular e bloqueia
+a linha do PEV antes de conferir o estado. O bloqueio deve coordenar com a decisão
+administrativa existente, evitando editar um ponto que acaba de ser aprovado ou
+reapresentar duas vezes. Configurar `AuditContext.user` antes da alteração, com
+motivo definido pelo servidor. Auditoria e alteração devem confirmar ou reverter juntas.
+Após escrita, devolver a representação atualizada sem depender de entidade em cache.
+
+Erros: `400` para entrada inválida ou campos desconhecidos no endereço; `401` para
+sessão inválida/conta inativa no HTTP; `403` para perfil não autorizado; `404` quando
+o titular não possui PEV; `409 BUSINESS_STATE_CONFLICT` para estado incompatível.
+Não disponibilizar consulta ou alteração de ponto alheio por parâmetro fornecido pelo cliente.
+
+As permissões necessárias já constam em `access_control/01_roles.sql` da fixture:
+UPDATE dos campos editáveis de `addresses` e de `pev.status`. Não estão previstas
+mudanças de estrutura ou grants nesta task. Conferir o banco oficial antes da implantação.
+O aceite deverá cobrir os dois perfis, estados permitidos/bloqueados, auditoria,
+preservação de IDs e endereços independentes, decisões simultâneas e a jornada
+solicitação → rejeição → edição → reapresentação → aprovação por HTTP.
+
 1. Toda escrita abre transação, deriva a identidade do Bearer, verifica perfil e titularidade e chama `AuditContext.user` antes da alteração.
 2. Criação de PEV persiste endereço PEV e PEV na mesma transação. A unicidade do banco fecha corridas de duas solicitações.
 3. Gestão de PEV aplica apenas as transições aprovadas na seção 3. Reapresentação reutiliza o PEV rejeitado; não há troca de responsável. Alteração de endereço pelo proprietário exige `PENDING` ou `REJECTED`. A API nunca escreve `establishment.is_pev`.
