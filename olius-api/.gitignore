@@ -39,5 +39,7 @@ build/
 *.key
 .env.*
 !.env.example
+!.env.compose.example
+!.env.docker.example
 
 /secrets/
