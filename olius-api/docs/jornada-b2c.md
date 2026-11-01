@@ -21,6 +21,8 @@ O Mobile consome os contratos HTTP; não chama procedures nem acessa o banco.
 | Obter próprio QR | `GET /api/v1/users/me` | Perfil autenticado contém `qrToken`; apresentação visual é responsabilidade do aplicativo. |
 | Solicitar PEV | `POST /api/v1/pevs` | Cidadão ou estabelecimento ativo solicita com endereço próprio do ponto; retorna `201`, PEV `PENDING` e `Location`. |
 | Consultar próprio PEV | `GET /api/v1/pevs/me` | Retorna identidade, situação e endereço do ponto; ausência retorna `404`. |
+| Editar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; somente `PENDING` ou `REJECTED`; preserva IDs e estado. |
+| Reapresentar ponto rejeitado | `POST /api/v1/pevs/me/resubmissions` | Titular ativo; sem corpo; mesmo PEV passa de `REJECTED` para `PENDING`. |
 | Localizar pontos aprovados | `GET /api/v1/pevs` | Consulta pública paginada com endereço e coordenadas disponíveis; somente `APPROVED`. |
 | Consultar PEVs para gestão | `GET /api/v1/admin/pevs` e `GET /api/v1/admin/pevs/{id}` | ADMIN ativo; lista e detalhe administrativos. |
 | Decidir situação do PEV | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo aprova, rejeita, inativa ou reativa nas transições permitidas. |
@@ -57,8 +59,6 @@ O Mobile consome os contratos HTTP; não chama procedures nem acessa o banco.
 
 | Capacidade prevista | Estado no código | Consequência para o consumidor |
 | --- | --- | --- |
-| Reapresentar PEV rejeitado | Não existe `POST /api/v1/pevs/me/resubmissions`. O administrador também não pode reapresentar. | O fluxo `REJECTED → PENDING` ainda não pode ser concluído pela API. |
-| Alterar endereço pelo proprietário | Não existe `PATCH /api/v1/pevs/me/address`. | Não oferecer edição do ponto como funcionalidade disponível. A regra aprovada limita edição a `PENDING` ou `REJECTED`. |
 | Histórico próprio de entregas | Não existe `GET /api/v1/users/me/deliveries`. | `/users/me/points` fornece movimentações de pontos, sem substituir um histórico completo de entregas com volume e estado. |
 | Busca geográfica do mapa | A listagem pública não possui contrato de consulta por distância ou área. | Coordenadas disponíveis podem ser exibidas; filtros geográficos dependem de alinhamento. |
 

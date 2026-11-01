@@ -39,8 +39,8 @@ As rotas abaixo estão implementadas, exceto as linhas marcadas como **não impl
 | --- | --- | --- |
 | Solicitar PEV | `POST /api/v1/pevs` | Cidadão/estabelecimento ativo; responsável do token. `201` com `Location` e PEV criado. |
 | Consultar próprio PEV | `GET /api/v1/pevs/me` | Responsável ativo. `200` com o próprio ponto; `404` quando ausente. |
-| Reapresentar PEV rejeitado | Proposta: `POST /api/v1/pevs/me/resubmissions` | **Não implementada.** Mesmo responsável; transição `REJECTED → PENDING`. |
-| Alterar endereço próprio | Proposta: `PATCH /api/v1/pevs/me/address` | **Não implementada.** Proprietário; somente `PENDING` ou `REJECTED`. |
+| Reapresentar PEV rejeitado | `POST /api/v1/pevs/me/resubmissions` | Titular ativo; sem corpo; `REJECTED → PENDING`, `200` com o mesmo PEV. |
+| Alterar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; somente `PENDING` ou `REJECTED`; `200` com o próprio PEV atualizado. |
 | Localizar PEVs | `GET /api/v1/pevs` | Público; somente `APPROVED`, com endereço e coordenadas disponíveis. Paginação 0/20, máximo 100; busca geográfica pendente. |
 | Listar/detalhar PEVs para gestão | `GET /api/v1/admin/pevs` e `GET /api/v1/admin/pevs/{id}` | ADMIN; fila, estados e detalhe autorizado, com paginação na lista. |
 | Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo; transições administrativas permitidas. `200` com detalhe atualizado. |
@@ -132,7 +132,7 @@ Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `own
 
 `PATCH /api/v1/admin/pevs/{id}/status` exige ADMIN ativo e recebe apenas `{"status":"APPROVED"}` (ou outro estado de destino). Permite `PENDING → APPROVED/REJECTED`, `APPROVED → INACTIVE` e `INACTIVE → APPROVED`; outras transições, inclusive repetição do mesmo estado e reapresentação de `REJECTED`, retornam `409`. ID inexistente retorna `404`. Sucesso retorna `200` com o detalhe atualizado do PEV.
 
-A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e será implementada no fluxo próprio.
+A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e é executada por POST /api/v1/pevs/me/resubmissions.
 
 ### Gestão administrativa de entregas implementada
 
@@ -148,8 +148,7 @@ Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entr
 
 ### Contrato da manutenção do próprio PEV — implementação nesta task
 
-Task `86e3xq9ec`. As rotas desta seção continuam pendentes até sua implementação;
-este contrato orienta os próximos commits, sem declarar disponibilidade no Mobile.
+Task `86e3xq9ec`. As rotas desta seção estão implementadas e documentadas no OpenAPI.
 
 | Operação | Entrada | Sucesso |
 | --- | --- | --- |
