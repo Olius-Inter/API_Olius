@@ -181,7 +181,34 @@ Parâmetros vazios, negativos, tamanho inválido ou deslocamento acima de
 `Integer.MAX_VALUE` retornam `400`. Cada requisição observa seu próprio estado;
 alterações entre páginas podem deslocar itens, então deduplique por ID na interface.
 
-## 7. Tratar erros e operações ainda indisponíveis
+### Histórico das entregas realizadas
+
+O cidadão autenticado consulta `GET /api/v1/users/me/deliveries?page=0&size=20`.
+A resposta contém `items`, `page`, `size` e `totalElements`; cada item traz `id`,
+`pevId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`, `recordStatus`
+e `revision` operacional. A lista inclui entregas registradas e anuladas, com os
+dados atuais após correções. Não soma revisões nem representa histórico de auditoria.
+
+Exiba `ANNULLED` como entrega anulada, preservando seu volume e sua data física;
+seu efeito vigente nos pontos é zero. Após restauração, a mesma entrega volta a
+`RECORDED`. Recarregue a lista para obter alterações administrativas.
+
+O histórico não retorna saldo. Para saldo e movimentações de cálculo, consulte
+`/users/me/points`; a revisão de cálculo dessa resposta é distinta da revisão
+operacional do histórico. O cidadão responsável por PEV vê aqui suas entregas
+realizadas, não as recebidas no ponto. ADMIN e estabelecimento recebem `403`.
+
+Paginação: padrões 0/20, máximo 100; ordem `deliveryDate DESC, id DESC`.
+Sem entregas ou além do total, a página é vazia e conserva `totalElements`.
+Parâmetros inválidos/vazios ou deslocamento acima de `Integer.MAX_VALUE` retornam
+`400`. Cada requisição possui sua própria visão; correções de data entre páginas
+podem deslocar itens. Deduplique por ID ao acumular páginas, mas não considere isso
+garantia de completude: a deduplicação não recupera itens omitidos por deslocamento.
+Ao atualizar, descarte as páginas acumuladas e reinicie em `page=0`.
+Páginas obtidas antes da atualização não garantem uma lista completa.
+O titular vem exclusivamente da sessão; não envie ID de cidadão para selecionar outro histórico.
+
+## 7. Tratar erros
 
 As falhas usam Problem Details com `status`, `code`, `detail` e `traceId`;
 erros de validação podem incluir `errors`. Trate pelo status/código, não pelo texto.
@@ -197,5 +224,4 @@ erros de validação podem incluir `errors`. Trate pelo status/código, não pel
 | `429` | Reduzir frequência e permitir nova tentativa posteriormente. |
 | `500` / `503` | Informar falha temporária; preservar os dados e a chave de entrega para recuperação. |
 
-Não apresentar `GET /api/v1/users/me/deliveries` como operação disponível.
 Ranking pertence à integração com a API Redis; a Core não publica cada entrega por HTTP.

@@ -46,7 +46,7 @@ As rotas abaixo estão implementadas, exceto as linhas marcadas como **não impl
 | Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo; transições administrativas permitidas. `200` com detalhe atualizado. |
 | Identificar cidadão por QR | `POST /api/v1/qr/resolutions` | Responsável ativo por PEV `APPROVED`; token no corpo, identificação mínima do cidadão ativo. A leitura não altera o token nem registra entrega. |
 | Registrar ou recuperar entrega | `POST /api/v1/pevs/{id}/deliveries` | Responsável autenticado do PEV; criação exige PEV aprovado e QR vigente. Recuperação por chave de entrega já confirmada segue a seção de idempotência. `201` na criação e `200` na recuperação, sob bloqueio transacional por chave interna. |
-| Histórico próprio | Proposta: `GET /api/v1/users/me/deliveries` | **Não implementada.** Movimentações de pontos não substituem histórico completo de entregas. |
+| Histórico próprio | `GET /api/v1/users/me/deliveries` | Cidadão ativo; entregas em que é beneficiário, com dados e revisão operacional vigentes, incluindo anuladas. `200` paginado, sem saldo. |
 | Entregas do PEV | `GET /api/v1/pevs/{id}/deliveries` | Responsável ativo do PEV; ID e nome do beneficiário, sem documento, contato ou QR. `page=0`, `size=20` por padrão, máximo 100; ordem `createdAt DESC, id DESC`. |
 | Detalhe da entrega | `GET /api/v1/pevs/{id}/deliveries/{deliveryId}` | Responsável ativo do PEV; consulta o recurso indicado pelo `Location` da criação. Entrega de outro PEV retorna `404`. |
 | Listar/detalhar entregas para gestão | `GET /api/v1/admin/deliveries` e `GET /api/v1/admin/deliveries/{id}` | ADMIN; lista paginada e detalhe, incluindo estado e revisão vigentes. |
@@ -145,6 +145,38 @@ A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approv
 Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entrega já anulada com revisão atual retorna `409 BUSINESS_STATE_CONFLICT`. Data posterior à criação original retorna `422 BUSINESS_RULE_VIOLATION`. Campos inválidos retornam `400`. A alteração, auditoria e reconstrução dos pontos ocorrem na mesma transação, sem repetição automática. Após timeout, consultar o detalhe antes de decidir por novo envio. A resposta mostra os efeitos vigentes; não representa o histórico completo de auditoria.
 
 ## 5. Autorização e transações
+
+### Histórico próprio de entregas implementado
+
+Task `86e3xqabw`. `GET /api/v1/users/me/deliveries` está implementado e documentado
+no OpenAPI e no guia Mobile. Esta seção descreve a representação disponível.
+
+Somente cidadão ativo consulta suas entregas como beneficiário. A identidade vem
+da sessão e filtra `delivery_pev.citizen_id`; não aceitar ID de cidadão fornecido
+pelo cliente. Estabelecimento e ADMIN recebem `403` nesta rota de titularidade.
+Responsável cidadão por PEV vê aqui suas entregas realizadas, não as recebidas no ponto.
+
+Resposta `200`: `items`, `page`, `size`, `totalElements`. Cada item contém `id`,
+`pevId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`,
+`recordStatus` e `revision` operacional. Incluir entregas `RECORDED` e `ANNULLED`,
+com dados vigentes após correção/restauração; não listar snapshots antigos nem
+expor QR, chave de reenvio, identidade do validador ou dados pessoais do responsável.
+Não incluir saldo: `/users/me/points` continua responsável pelo saldo e pelas
+movimentações de cálculo. O histórico não é uma trilha completa de auditoria.
+
+Paginação segue o padrão existente: `page=0`, `size=20`, máximo 100; ordem
+`deliveryDate DESC, id DESC`. Parâmetros vazios, inválidos ou deslocamento acima
+de `Integer.MAX_VALUE` retornam `400`. Conta/sessão inválida retorna `401`.
+Sem entregas, retornar página vazia; página além do total preserva `totalElements`.
+Total e itens devem usar a mesma visão transacional (`REPEATABLE_READ`).
+Cada requisição tem sua própria visão; correções da data entre páginas podem
+deslocar itens. Deduplicar IDs não recupera itens omitidos. Ao atualizar a lista,
+descartar páginas acumuladas e reiniciar em `page=0`; páginas anteriores à atualização
+não garantem completude.
+
+Implementação somente de leitura, usando tabelas e permissões existentes, sem
+migração. Testar isolamento entre cidadãos, distinção entre beneficiário e
+validador, paginação/ordenação, estados e revisões vigentes, autenticação e perfis.
 
 ### Contrato da manutenção do próprio PEV — implementação nesta task
 

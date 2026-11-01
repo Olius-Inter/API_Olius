@@ -205,6 +205,14 @@ class PevIntegrationTest {
                 .andExpect(jsonPath("$.movements.length()").value(1))
                 .andExpect(jsonPath("$.movements[0].deliveryId").value(id.toString()))
                 .andExpect(jsonPath("$.movements[0].points").value(points[step]));
+            mvc.perform(get("/api/v1/users/me/deliveries").header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(id.toString()))
+                .andExpect(jsonPath("$.items[0].oilVolumeLiters").value(step==2 ? 2.75 : 5.25))
+                .andExpect(jsonPath("$.items[0].pointsEarned").value(points[step]))
+                .andExpect(jsonPath("$.items[0].recordStatus").value(states[step]))
+                .andExpect(jsonPath("$.items[0].revision").value(step+2));
         }
     }
 
@@ -359,6 +367,129 @@ class PevIntegrationTest {
             .andExpect(jsonPath("$.createdAt").value(original.get("createdAt").asText()))
             .andExpect(jsonPath("$.address.id").value(addressId))
             .andExpect(jsonPath("$.address.street").value("Rua corrigida"));
+    }
+
+    @Test void ownDeliveryHistorySeparatesBeneficiaryFromValidatorAndOtherCitizens() throws Exception {
+        var owner=citizen();var first=citizen();var second=citizen();
+        String ownerAccess=login(owner.email()),firstAccess=login(first.email()),secondAccess=login(second.email());
+        UUID pev=approvedDeliveryPev(owner,ownerAccess);
+        String firstQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,first.id());
+        String secondQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,second.id());
+        var date=java.time.Instant.now().minusSeconds(60);
+        String firstDelivery=recordForTest(pev,ownerAccess,firstQr,"3.70",date);
+        String secondDelivery=recordForTest(pev,ownerAccess,secondQr,"2.00",date);
+        String route="/api/v1/users/me/deliveries";
+        var response=mvc.perform(get(route).header("Authorization","Bearer "+firstAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(firstDelivery))
+            .andExpect(jsonPath("$.items[0].pevId").value(pev.toString()))
+            .andExpect(jsonPath("$.items[0].oilVolumeLiters").value(3.70))
+            .andExpect(jsonPath("$.items[0].pointsEarned").value(3))
+            .andExpect(jsonPath("$.items[0].validatedBy").doesNotExist())
+            .andExpect(jsonPath("$.items[0].qrToken").doesNotExist())
+            .andExpect(jsonPath("$.items[0].idempotencyKey").doesNotExist())
+            .andExpect(jsonPath("$.items[0].balanceAfter").doesNotExist()).andReturn();
+        assertThat(response.getResponse().getContentAsString())
+            .doesNotContain(firstQr,secondQr,owner.email(),first.email(),second.email());
+        mvc.perform(get(route).header("Authorization","Bearer "+secondAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(secondDelivery));
+        mvc.perform(get(route).header("Authorization","Bearer "+ownerAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.totalElements").value(0));
+        // Identidade fornecida pelo cliente não substitui o titular da sessão.
+        mvc.perform(get(route).param("citizenId",second.id().toString())
+            .header("Authorization","Bearer "+firstAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(firstDelivery));
+    }
+
+    @Test void ownDeliveryHistoryRequiresActiveCitizenSession() throws Exception {
+        String route="/api/v1/users/me/deliveries";
+        mvc.perform(get(route)).andExpect(status().isUnauthorized());
+        var actor=activeAdmin();var company=establishment();var citizen=citizen();
+        mvc.perform(get(route).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isForbidden());
+        mvc.perform(get(route).header("Authorization","Bearer "+login(company.email())))
+            .andExpect(status().isForbidden());
+        String access=login(citizen.email());
+        mvc.perform(get(route).header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",citizen.id());
+        mvc.perform(get(route).header("Authorization","Bearer "+access))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test void ownDeliveryHistoryPaginatesInDateAndIdOrderAndRejectsInvalidParameters() throws Exception {
+        var owner=citizen();var beneficiary=citizen();
+        String access=login(owner.email()),citizenAccess=login(beneficiary.email());
+        UUID pev=approvedDeliveryPev(owner,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        String older=recordForTest(pev,access,qr,"1.00",date.minusSeconds(60));
+        String tiedFirst=recordForTest(pev,access,qr,"2.00",date);
+        String tiedSecond=recordForTest(pev,access,qr,"3.00",date);
+        var tied=List.of(tiedFirst,tiedSecond).stream().sorted(java.util.Comparator.reverseOrder()).toList();
+        var expected=List.of(tied.get(0),tied.get(1),older);
+        String route="/api/v1/users/me/deliveries";
+        mvc.perform(get(route).header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(3))
+            .andExpect(jsonPath("$.items.length()").value(3))
+            .andExpect(jsonPath("$.items[0].id").value(expected.get(0)))
+            .andExpect(jsonPath("$.items[1].id").value(expected.get(1)))
+            .andExpect(jsonPath("$.items[2].id").value(older));
+        var seen=new ArrayList<String>();
+        for(int page=0;page<3;page++) {
+            var response=mvc.perform(get(route).param("page",Integer.toString(page)).param("size","1")
+                .header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(page))
+                .andExpect(jsonPath("$.size").value(1)).andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+            seen.add(json.readTree(response.getResponse().getContentAsString()).get("items").get(0).get("id").asText());
+        }
+        assertThat(seen).containsExactlyElementsOf(expected).doesNotHaveDuplicates();
+        mvc.perform(get(route).param("page","3").param("size","1")
+            .header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.totalElements").value(3));
+        for(String query:List.of("?page=","?size=","?page=-1","?size=0","?size=101",
+                "?page=text","?page=2147483647&size=20"))
+            mvc.perform(get(route+query).header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test void correctingPhysicalDateReordersOwnHistoryAndItsPages() throws Exception {
+        var owner=citizen();var beneficiary=citizen();
+        String access=login(owner.email()),citizenAccess=login(beneficiary.email());
+        UUID pev=approvedDeliveryPev(owner,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(7200).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String older=recordForTest(pev,access,qr,"1.00",date);
+        String newer=recordForTest(pev,access,qr,"2.00",date.plusSeconds(60));
+        String route="/api/v1/users/me/deliveries";
+        mvc.perform(get(route).header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(newer));
+        var actor=activeAdmin();var corrected=date.plusSeconds(120);
+        mvc.perform(post("/api/v1/admin/deliveries/"+older+"/corrections")
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON)
+            .content(correction(1,"RECORDED","1.00",corrected,"Data física conferida")))
+            .andExpect(status().isOk());
+        mvc.perform(get(route).header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+            .andExpect(jsonPath("$.items[0].id").value(older))
+            .andExpect(jsonPath("$.items[0].deliveryDate").value(corrected.toString()))
+            .andExpect(jsonPath("$.items[1].id").value(newer));
+        var ids=new ArrayList<String>();
+        for(int page=0;page<2;page++) {
+            var response=mvc.perform(get(route).param("page",Integer.toString(page)).param("size","1")
+                .header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+            ids.add(json.readTree(response.getResponse().getContentAsString()).get("items").get(0).get("id").asText());
+        }
+        assertThat(ids).containsExactly(older,newer).doesNotHaveDuplicates();
     }
 
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
@@ -995,7 +1126,31 @@ class PevIntegrationTest {
         var correction=paths.get("/api/v1/admin/deliveries/{id}/corrections").get("post");
         assertThat(correction.get("summary").asText()).contains("restaurar");
         assertThat(correction.get("responses").has("409")).isTrue();
-        assertThat(paths.has("/api/v1/users/me/deliveries")).isFalse();
+        assertThat(paths.get("/api/v1/users/me/deliveries").get("get").get("security").toString())
+            .contains("bearer");
+        var history=paths.get("/api/v1/users/me/deliveries").get("get");
+        assertThat(history.get("summary").asText()).contains("histórico próprio");
+        assertThat(history.get("description").asText()).contains("deliveryDate DESC, id DESC","ANNULLED");
+        assertThat(history.get("responses").has("200")).isTrue();
+        assertThat(history.get("responses").has("403")).isTrue();
+        for(var parameter:history.get("parameters")) {
+            String name=parameter.get("name").asText();
+            if(name.equals("page") || name.equals("size")) {
+                var pagination=parameter.get("schema");
+                assertThat(pagination.get("type").asText()).isEqualTo("integer");
+                assertThat(pagination.get("default").asInt()).isEqualTo(name.equals("page") ? 0 : 20);
+                assertThat(pagination.get("minimum").asInt()).isEqualTo(name.equals("page") ? 0 : 1);
+                assertThat(pagination.get("maximum").asLong()).isEqualTo(name.equals("page") ? 2147483647L : 100L);
+            }
+        }
+        var schemas=json.readTree(response.getResponse().getContentAsString()).get("components").get("schemas");
+        assertThat(schemas.get("CitizenDeliveryHistoryPage").get("properties").has("items")).isTrue();
+        var historyItem=schemas.get("CitizenDeliveryHistoryItem").get("properties");
+        for(String field:List.of("id","pevId","oilVolumeLiters","deliveryDate","createdAt",
+                "pointsEarned","recordStatus","revision"))
+            assertThat(historyItem.has(field)).isTrue();
+        for(String hidden:List.of("qrToken","idempotencyKey","validatedBy","balanceAfter"))
+            assertThat(historyItem.has(hidden)).isFalse();
         for(var entry:Map.of("/api/v1/pevs/me/address","patch",
                 "/api/v1/pevs/me/resubmissions","post").entrySet()) {
             var operation=paths.get(entry.getKey()).get(entry.getValue());
