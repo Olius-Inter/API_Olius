@@ -361,6 +361,58 @@ class PevIntegrationTest {
             .andExpect(jsonPath("$.address.street").value("Rua corrigida"));
     }
 
+    @Test void ownDeliveryHistorySeparatesBeneficiaryFromValidatorAndOtherCitizens() throws Exception {
+        var owner=citizen();var first=citizen();var second=citizen();
+        String ownerAccess=login(owner.email()),firstAccess=login(first.email()),secondAccess=login(second.email());
+        UUID pev=approvedDeliveryPev(owner,ownerAccess);
+        String firstQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,first.id());
+        String secondQr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,second.id());
+        var date=java.time.Instant.now().minusSeconds(60);
+        String firstDelivery=recordForTest(pev,ownerAccess,firstQr,"3.70",date);
+        String secondDelivery=recordForTest(pev,ownerAccess,secondQr,"2.00",date);
+        String route="/api/v1/users/me/deliveries";
+        var response=mvc.perform(get(route).header("Authorization","Bearer "+firstAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items.length()").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(firstDelivery))
+            .andExpect(jsonPath("$.items[0].pevId").value(pev.toString()))
+            .andExpect(jsonPath("$.items[0].oilVolumeLiters").value(3.70))
+            .andExpect(jsonPath("$.items[0].pointsEarned").value(3))
+            .andExpect(jsonPath("$.items[0].validatedBy").doesNotExist())
+            .andExpect(jsonPath("$.items[0].qrToken").doesNotExist())
+            .andExpect(jsonPath("$.items[0].idempotencyKey").doesNotExist())
+            .andExpect(jsonPath("$.items[0].balanceAfter").doesNotExist()).andReturn();
+        assertThat(response.getResponse().getContentAsString())
+            .doesNotContain(firstQr,secondQr,owner.email(),first.email(),second.email());
+        mvc.perform(get(route).header("Authorization","Bearer "+secondAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(secondDelivery));
+        mvc.perform(get(route).header("Authorization","Bearer "+ownerAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.totalElements").value(0));
+        // Identidade fornecida pelo cliente não substitui o titular da sessão.
+        mvc.perform(get(route).param("citizenId",second.id().toString())
+            .header("Authorization","Bearer "+firstAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(firstDelivery));
+    }
+
+    @Test void ownDeliveryHistoryRequiresActiveCitizenSession() throws Exception {
+        String route="/api/v1/users/me/deliveries";
+        mvc.perform(get(route)).andExpect(status().isUnauthorized());
+        var actor=activeAdmin();var company=establishment();var citizen=citizen();
+        mvc.perform(get(route).header("Authorization","Bearer "+actor.access()))
+            .andExpect(status().isForbidden());
+        mvc.perform(get(route).header("Authorization","Bearer "+login(company.email())))
+            .andExpect(status().isForbidden());
+        String access=login(citizen.email());
+        mvc.perform(get(route).header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",citizen.id());
+        mvc.perform(get(route).header("Authorization","Bearer "+access))
+            .andExpect(status().isUnauthorized());
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
