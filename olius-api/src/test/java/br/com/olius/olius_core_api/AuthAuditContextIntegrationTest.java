@@ -135,7 +135,7 @@ class AuthAuditContextIntegrationTest {
             var transaction=new TransactionTemplate(new DataSourceTransactionManager(pool));
             Integer pid=transaction.execute(status -> {
                 assertEmptyContext(jdbc);
-                jdbc.queryForObject("SELECT result_code FROM open_auth_session(?,?)",String.class,user,hash());
+                jdbc.queryForObject("SELECT result_code FROM open_auth_session(?,?,?)",String.class,user,hash(),"not-used-for-login");
                 assertEmptyContext(jdbc);
                 new AuditContext(jdbc).user(user,"Operação seguinte");
                 jdbc.update("UPDATE users SET name='Updated fixture' WHERE id=?",user);
@@ -155,18 +155,18 @@ class AuthAuditContextIntegrationTest {
     }
 
     @Test
-    void preparedUpdatePreservesPrivilegesAndCanBeReapplied() throws Exception {
+    void historicalAuditPatchRejectsNewLoginContractAndPreservesPrivileges() throws Exception {
         String update=Files.readString(Path.of("scripts/sql/update-auth-audit-context.sql"));
         try(var connection=owner(); var statement=connection.createStatement()) {
-            // Reproduz os atributos antigos sem trocar o owner interno nem os grants.
-            statement.execute("ALTER FUNCTION public.open_auth_session(uuid,bytea) SET app.audit_actor='SYSTEM'");
-            statement.execute(update);
-            statement.execute(update);
+            // Atualização histórica deve recusar o contrato novo sem recriar o login inseguro.
+            assertThatThrownBy(() -> statement.execute(update)).isInstanceOf(SQLException.class);
+            statement.execute("ROLLBACK");
+            assertThat(scalar(connection,"SELECT (to_regprocedure('public.open_auth_session(uuid,bytea)') IS NULL)::text")).isEqualTo("true");
             assertThat(scalar(connection,"""
                     SELECT (proconfig=ARRAY['search_path=pg_catalog, pg_temp']
                         AND proowner='olius_auth_owner'::regrole AND prosecdef
                         AND has_function_privilege('olius_test_api',oid,'EXECUTE'))::text
-                    FROM pg_proc WHERE oid='public.open_auth_session(uuid,bytea)'::regprocedure
+                    FROM pg_proc WHERE oid='public.open_auth_session(uuid,bytea,text)'::regprocedure
                     """)).isEqualTo("true");
         }
     }
@@ -178,8 +178,8 @@ class AuthAuditContextIntegrationTest {
 
     private String call(Connection connection,Operation operation,Session session,boolean invalid) throws SQLException {
         return switch(operation) {
-            case OPEN -> scalar(connection,"SELECT result_code FROM open_auth_session(?,?)",
-                    invalid?null:session.user(),invalid?null:hash());
+            case OPEN -> scalar(connection,"SELECT result_code FROM open_auth_session(?,?,?)",
+                    invalid?null:session.user(),invalid?null:hash(),"not-used-for-login");
             case ROTATE -> scalar(connection,"SELECT result_code FROM rotate_auth_refresh_token(?,?)",
                     invalid?null:session.hash(),invalid?null:hash());
             case REVOKE -> scalar(connection,"SELECT revoke_auth_session(?,?)",
@@ -191,8 +191,8 @@ class AuthAuditContextIntegrationTest {
 
     private Session session() throws SQLException {
         UUID user=user(); byte[] hash=hash();
-        try(var connection=api(); var query=connection.prepareStatement("SELECT session_id FROM open_auth_session(?,?)")) {
-            query.setObject(1,user); query.setBytes(2,hash);
+        try(var connection=api(); var query=connection.prepareStatement("SELECT session_id FROM open_auth_session(?,?,?)")) {
+            query.setObject(1,user); query.setBytes(2,hash); query.setString(3,"not-used-for-login");
             try(var result=query.executeQuery()) {
                 assertThat(result.next()).isTrue();
                 return new Session(user,result.getObject(1,UUID.class),hash);

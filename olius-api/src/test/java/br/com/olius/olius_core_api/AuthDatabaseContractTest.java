@@ -132,9 +132,10 @@ class AuthDatabaseContractTest {
     }
 
     private UUID open(Connection connection, UUID user, byte[] hash) throws SQLException {
-        try (var query = connection.prepareStatement("SELECT * FROM open_auth_session(?,?)")) {
+        try (var query = connection.prepareStatement("SELECT * FROM open_auth_session(?,?,?)")) {
             query.setObject(1, user);
             query.setBytes(2, hash);
+            query.setString(3, "fixture-only");
             try (var result = query.executeQuery()) {
                 assertThat(result.next()).isTrue();
                 assertThat(result.getString("result_code")).isEqualTo("OK");
