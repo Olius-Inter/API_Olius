@@ -208,6 +208,67 @@ class PevIntegrationTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "false,PENDING", "false,REJECTED", "false,APPROVED", "false,INACTIVE",
+        "true,PENDING", "true,REJECTED", "true,APPROVED", "true,INACTIVE"
+    })
+    void ownerEditsOnlyPendingOrRejectedPevAddress(boolean company,String state) throws Exception {
+        var account=company ? establishment() : citizen();String access=login(account.email());
+        var result=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated()).andReturn();
+        UUID pev=UUID.fromString(json.readTree(result.getResponse().getContentAsString()).get("id").asText());
+        deliveryPevIds.add(pev);
+        UUID address=admin().queryForObject("SELECT address_id FROM pev WHERE id=?",UUID.class,pev);
+        String commercial=company ? admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,account.id()) : null;
+        var actor=activeAdmin();
+        if(!state.equals("PENDING"))
+            admin().update("UPDATE pev SET status=CAST(? AS approval_status_t),approved_by=?,approved_at=clock_timestamp() WHERE id=?",state,actor.id(),pev);
+        String before=admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a WHERE id=?",String.class,address);
+        long logs=admin().queryForObject("SELECT count(*) FROM addresses_log WHERE id=?",Long.class,address);
+        var edited=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/pevs/me/address")
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(request().replace("Rua do PEV","Rua atualizada")));
+        if(state.equals("PENDING") || state.equals("REJECTED")) {
+            edited.andExpect(status().isOk()).andExpect(jsonPath("$.id").value(pev.toString()))
+                .andExpect(jsonPath("$.status").value(state)).andExpect(jsonPath("$.address.id").value(address.toString()))
+                .andExpect(jsonPath("$.address.street").value("Rua atualizada"));
+            assertThat(admin().queryForObject("SELECT count(*) FROM addresses_log WHERE id=? AND performed_by=? AND operation='UPDATE'",Long.class,address,account.id())).isEqualTo(2);
+        } else {
+            edited.andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BUSINESS_STATE_CONFLICT"));
+            assertThat(admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a WHERE id=?",String.class,address)).isEqualTo(before);
+            assertThat(admin().queryForObject("SELECT count(*) FROM addresses_log WHERE id=?",Long.class,address)).isEqualTo(logs);
+        }
+        assertThat(admin().queryForObject("SELECT address_id FROM pev WHERE id=?",UUID.class,pev)).isEqualTo(address);
+        if(company)
+            assertThat(admin().queryForObject("SELECT to_jsonb(a)::text FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,account.id())).isEqualTo(commercial);
+    }
+
+    @Test void addressEditingRejectsMissingPevInvalidInputsAndUnauthorizedAccounts() throws Exception {
+        String route="/api/v1/pevs/me/address";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isUnauthorized());
+        var account=citizen();String access=login(account.email());var actor=activeAdmin();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated());
+        for(String invalid:List.of("{}", "{\"address\":null}",request().replace("01001000","invalid"),
+                request().replaceFirst("\\}$",",\"status\":\"APPROVED\"}"),
+                request().replace("\"street\"","\"owner_kind\":\"ESTABLISHMENT\",\"street\"")))
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+                .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(invalid))
+                .andExpect(status().isBadRequest());
+        admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",account.id());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(route)
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON).content(request()))
+            .andExpect(status().isUnauthorized());
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
@@ -842,7 +903,7 @@ class PevIntegrationTest {
         var correction=paths.get("/api/v1/admin/deliveries/{id}/corrections").get("post");
         assertThat(correction.get("summary").asText()).contains("restaurar");
         assertThat(correction.get("responses").has("409")).isTrue();
-        for(String absent:List.of("/api/v1/pevs/me/resubmissions","/api/v1/pevs/me/address",
+        for(String absent:List.of("/api/v1/pevs/me/resubmissions",
                 "/api/v1/users/me/deliveries"))
             assertThat(paths.has(absent)).isFalse();
         var pevs=paths.get("/api/v1/pevs");

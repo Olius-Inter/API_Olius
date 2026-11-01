@@ -1,6 +1,7 @@
 package br.com.olius.olius_core_api.controller;
 
 import br.com.olius.olius_core_api.dto.PevRequests.Create;
+import br.com.olius.olius_core_api.dto.PevRequests.UpdateAddress;
 import br.com.olius.olius_core_api.dto.PevResponses.OwnPev;
 import br.com.olius.olius_core_api.dto.PevResponses.PublicPage;
 import br.com.olius.olius_core_api.security.Caller;
@@ -27,6 +28,11 @@ public class PevController {
     @GetMapping("/me")
     public OwnPev own(Authentication authentication) {
         return service.own(Caller.id(authentication),Caller.type(authentication));
+    }
+
+    @PatchMapping("/me/address")
+    public OwnPev updateAddress(@Valid @RequestBody UpdateAddress request,Authentication authentication) {
+        return service.updateAddress(request,Caller.id(authentication),Caller.type(authentication));
     }
 
     @GetMapping
