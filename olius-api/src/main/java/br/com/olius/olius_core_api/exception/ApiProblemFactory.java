@@ -51,7 +51,7 @@ public class ApiProblemFactory {
 
     public HttpStatus status(ApiErrorCode code) {
         return switch (code) {
-            case VALIDATION_ERROR, MALFORMED_REQUEST, HTTP_REQUEST_ERROR -> HttpStatus.BAD_REQUEST;
+            case VALIDATION_ERROR, PASSWORD_RESET_INVALID, MALFORMED_REQUEST, HTTP_REQUEST_ERROR -> HttpStatus.BAD_REQUEST;
             case AUTHENTICATION_REQUIRED -> HttpStatus.UNAUTHORIZED;
             case ACCESS_DENIED -> HttpStatus.FORBIDDEN;
             case RESOURCE_NOT_FOUND -> HttpStatus.NOT_FOUND;
@@ -94,6 +94,7 @@ public class ApiProblemFactory {
 
     private String detail(ApiErrorCode code) {
         return switch (code) {
+            case PASSWORD_RESET_INVALID -> "Não foi possível redefinir a senha com este link. Solicite uma nova recuperação.";
             case VALIDATION_ERROR -> "Verifique os campos informados.";
             case MALFORMED_REQUEST -> "O corpo ou os parâmetros da requisição são inválidos.";
             case AUTHENTICATION_REQUIRED -> "É necessário apresentar uma autenticação válida.";

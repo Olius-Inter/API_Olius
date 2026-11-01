@@ -1,6 +1,6 @@
 /* Consultas somente de leitura. Executar após a carga, com o mesmo schema ativo.
    Resultado esperado na implantação inicial: primeira consulta sem linhas;
-   61 tabelas no resumo (58 da aplicação + 3 documentais); roles documentadas e existência física conferidas.
+   63 tabelas no resumo (60 da aplicação + 3 documentais); roles documentadas e existência física conferidas.
    Quantidades são referência desta versão, não limites para evoluções futuras. */
 
 -- Diferenças entre objetos reais e documentação. Não remove registros antigos.

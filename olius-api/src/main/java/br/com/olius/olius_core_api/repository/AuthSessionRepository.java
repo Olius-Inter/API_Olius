@@ -11,10 +11,10 @@ public class AuthSessionRepository {
     public record State(boolean valid,UserType type,Instant expiresAt) { }
     private final JdbcTemplate jdbc;
     public AuthSessionRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
-    public Outcome open(UUID userId,byte[] hash) {
-        return jdbc.queryForObject("SELECT * FROM open_auth_session(?,?)",(rs,row) ->
+    public Outcome open(UUID userId,byte[] hash,String validatedHash) {
+        return jdbc.queryForObject("SELECT * FROM public.open_auth_session(?,?,?)",(rs,row) ->
             new Outcome(rs.getString("result_code"),rs.getObject("session_id",UUID.class),userId,
-                rs.getTimestamp(EXPIRES_AT)==null ? null : rs.getTimestamp(EXPIRES_AT).toInstant()),userId,hash);
+                rs.getTimestamp(EXPIRES_AT)==null ? null : rs.getTimestamp(EXPIRES_AT).toInstant()),userId,hash,validatedHash);
     }
     public Outcome rotate(byte[] current,byte[] next) {
         return jdbc.queryForObject("SELECT * FROM rotate_auth_refresh_token(?,?)",(rs,row) ->

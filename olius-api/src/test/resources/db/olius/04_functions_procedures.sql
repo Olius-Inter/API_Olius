@@ -2059,7 +2059,7 @@ $$;
 COMMENT ON FUNCTION public.auth_idle_duration(public.user_type_t) IS
 'Fonte única da inatividade por perfil: duração decorrida em horas, sem dias de calendário/DST.';
 
-CREATE OR REPLACE FUNCTION public.open_auth_session(p_user_id UUID, p_token_hash BYTEA)
+CREATE OR REPLACE FUNCTION public.open_auth_session(p_user_id UUID, p_token_hash BYTEA, p_expected_password_hash TEXT)
 RETURNS TABLE (result_code TEXT, session_id UUID, expires_at TIMESTAMPTZ)
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
@@ -2075,13 +2075,17 @@ BEGIN
         PERFORM set_config(setting_name, setting_value, true)
         FROM (VALUES ('app.audit_actor', 'SYSTEM'), ('app.current_user_id', ''),
                      ('app.operational_driver_id', ''), ('app.audit_reason', '')) AS settings(setting_name, setting_value);
-        IF p_token_hash IS NULL OR octet_length(p_token_hash) <> 32 THEN
+        IF p_token_hash IS NULL OR octet_length(p_token_hash) <> 32
+           OR p_expected_password_hash IS NULL OR btrim(p_expected_password_hash)='' THEN
             RETURN QUERY SELECT 'INVALID_INPUT'::TEXT, NULL::UUID, NULL::TIMESTAMPTZ; EXIT session_operation;
         END IF;
-        SELECT u.id, u.status, u.user_type INTO v_user FROM public.users u
+        SELECT u.id, u.status, u.user_type, u.password_hash INTO v_user FROM public.users u
         WHERE u.id = p_user_id FOR UPDATE;
         IF NOT FOUND OR v_user.status <> 'ACTIVE'::public.active_status_t THEN
             RETURN QUERY SELECT 'USER_UNAVAILABLE'::TEXT, NULL::UUID, NULL::TIMESTAMPTZ; EXIT session_operation;
+        END IF;
+        IF v_user.password_hash IS DISTINCT FROM p_expected_password_hash THEN
+            RETURN QUERY SELECT 'CREDENTIAL_CHANGED'::TEXT, NULL::UUID, NULL::TIMESTAMPTZ; EXIT session_operation;
         END IF;
         v_now := clock_timestamp();
         v_expiry := v_now + public.auth_idle_duration(v_user.user_type);
@@ -2273,7 +2277,7 @@ COMMENT ON FUNCTION public.get_auth_session_status(UUID, UUID) IS
 
 -- Bloqueio público na criação; ownership e acessos: access_control/01_roles.sql.
 REVOKE ALL ON FUNCTION public.auth_idle_duration(public.user_type_t) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.open_auth_session(UUID, BYTEA) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.open_auth_session(UUID, BYTEA, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.rotate_auth_refresh_token(BYTEA, BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.revoke_auth_session(UUID, UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.revoke_user_auth_sessions(UUID) FROM PUBLIC;
@@ -2697,4 +2701,116 @@ COMMENT ON FUNCTION public.get_collection_revision_history(UUID,UUID,INTEGER,INT
 'Histórico operacional B2B exclusivo de ADMIN ativo: revisões, motivos históricos e paginação; erro 55000 se auditoria insuficiente. Sem cálculos nem snapshots brutos.';
 REVOKE ALL ON FUNCTION public.get_collection_revision_history(UUID,UUID,INTEGER,INTEGER) FROM PUBLIC;
 -- END COLLECTION_REVISION_HISTORY
+COMMIT;
+
+BEGIN;
+-- Funções de escrita: a Core controla COMMIT e só envia o e-mail depois dele.
+CREATE OR REPLACE FUNCTION public.issue_password_reset(
+    p_email TEXT, p_token_hash BYTEA, p_valid_for INTERVAL DEFAULT INTERVAL '30 minutes')
+RETURNS TABLE(result_code TEXT,reset_id UUID,user_id UUID,expires_at TIMESTAMPTZ)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_uid UUID; v_ids UUID[]; v_now TIMESTAMPTZ; v_expiry TIMESTAMPTZ;
+        v_id UUID; v_context JSONB; v_constraint TEXT;
+BEGIN
+    SELECT jsonb_object_agg(n,current_setting(n,true)) INTO v_context
+        FROM unnest(ARRAY['app.audit_actor','app.current_user_id','app.operational_driver_id','app.audit_reason']) n;
+    <<reset_operation>>
+    BEGIN
+        IF p_email IS NULL OR btrim(p_email)='' OR length(p_email)>255
+           OR length(p_email)-length(replace(p_email,'@',''))<>1
+           OR split_part(p_email,'@',1)='' OR split_part(p_email,'@',2)=''
+           OR p_token_hash IS NULL OR octet_length(p_token_hash)<>32
+           OR p_valid_for IS NULL OR NOT isfinite(p_valid_for) OR p_valid_for<=INTERVAL '0 seconds' THEN
+            RETURN QUERY SELECT 'INVALID_INPUT'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END IF;
+        -- Parte local exata; somente domínio normalizado. Ambiguidade falha fechada.
+        SELECT array_agg(u.id) INTO v_ids FROM public.users u
+        WHERE split_part(u.email,'@',1)=split_part(p_email,'@',1)
+          AND lower(split_part(u.email,'@',2))=lower(split_part(p_email,'@',2))
+          AND length(u.email)-length(replace(u.email,'@',''))=1;
+        IF cardinality(v_ids) IS DISTINCT FROM 1 THEN
+            RETURN QUERY SELECT 'USER_UNAVAILABLE'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END IF;
+        v_uid:=v_ids[1];
+        PERFORM 1 FROM public.users u WHERE u.id=v_uid AND u.status='ACTIVE'
+          AND split_part(u.email,'@',1)=split_part(p_email,'@',1)
+          AND lower(split_part(u.email,'@',2))=lower(split_part(p_email,'@',2))
+          AND length(u.email)-length(replace(u.email,'@',''))=1 FOR UPDATE;
+        IF NOT FOUND THEN
+            RETURN QUERY SELECT 'USER_UNAVAILABLE'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END IF;
+        v_now:=clock_timestamp();
+        BEGIN
+            v_expiry:=v_now+p_valid_for;
+        EXCEPTION WHEN datetime_field_overflow THEN
+            RETURN QUERY SELECT 'INVALID_INPUT'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END;
+        IF NOT isfinite(v_expiry) OR v_expiry<=v_now THEN
+            RETURN QUERY SELECT 'INVALID_INPUT'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END IF;
+        IF EXISTS(SELECT 1 FROM public.password_reset_token t WHERE t.user_id=v_uid AND t.issued_at>v_now-INTERVAL '60 seconds')
+           OR (SELECT count(*) FROM public.password_reset_token t
+               WHERE t.user_id=v_uid AND t.issued_at>v_now-INTERVAL '15 minutes')>=3 THEN
+            RETURN QUERY SELECT 'RATE_LIMITED'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END IF;
+        PERFORM set_config(n,v,true) FROM (VALUES('app.audit_actor','SYSTEM'),('app.current_user_id',''),
+            ('app.operational_driver_id',''),('app.audit_reason','Emissão de recuperação de senha')) settings(n,v);
+        BEGIN
+            INSERT INTO public.password_reset_token(user_id,token_hash,issued_at,expires_at)
+                VALUES(v_uid,p_token_hash,v_now,v_expiry) RETURNING id INTO v_id;
+        EXCEPTION WHEN unique_violation THEN
+            GET STACKED DIAGNOSTICS v_constraint=CONSTRAINT_NAME;
+            IF v_constraint IS DISTINCT FROM 'uq_password_reset_hash' THEN RAISE; END IF;
+            RETURN QUERY SELECT 'HASH_CONFLICT'::TEXT,NULL::UUID,NULL::UUID,NULL::TIMESTAMPTZ; EXIT reset_operation;
+        END;
+        RETURN QUERY SELECT 'OK'::TEXT,v_id,v_uid,v_expiry;
+    END reset_operation;
+    PERFORM set_config(key,coalesce(value,''),true) FROM jsonb_each_text(v_context);
+    RETURN;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config(key,coalesce(value,''),true) FROM jsonb_each_text(v_context);
+    RAISE;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.complete_password_reset(p_token_hash BYTEA,p_password_hash TEXT)
+RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_uid UUID; v_user RECORD; v_token public.password_reset_token%ROWTYPE;
+        v_now TIMESTAMPTZ; v_result TEXT; v_context JSONB;
+BEGIN
+    SELECT jsonb_object_agg(n,current_setting(n,true)) INTO v_context
+        FROM unnest(ARRAY['app.audit_actor','app.current_user_id','app.operational_driver_id','app.audit_reason']) n;
+    <<reset_operation>>
+    BEGIN
+        IF p_token_hash IS NULL OR octet_length(p_token_hash)<>32 OR p_password_hash IS NULL
+           OR btrim(p_password_hash)='' OR length(p_password_hash)>255 THEN
+            v_result:='INVALID_INPUT'; EXIT reset_operation;
+        END IF;
+        -- Descoberta sem lock; todos os caminhos de auth bloqueiam primeiro users.
+        SELECT t.user_id INTO v_uid FROM public.password_reset_token t WHERE t.token_hash=p_token_hash;
+        IF NOT FOUND THEN v_result:='INVALID_TOKEN'; EXIT reset_operation; END IF;
+        SELECT u.status INTO v_user FROM public.users u WHERE u.id=v_uid FOR UPDATE;
+        IF NOT FOUND OR v_user.status<>'ACTIVE' THEN v_result:='INVALID_TOKEN'; EXIT reset_operation; END IF;
+        SELECT t.* INTO v_token FROM public.password_reset_token t
+            WHERE t.token_hash=p_token_hash AND t.user_id=v_uid FOR UPDATE;
+        v_now:=clock_timestamp();
+        IF NOT FOUND OR v_token.consumed_at IS NOT NULL OR v_token.invalidated_at IS NOT NULL
+           OR v_token.expires_at<=v_now THEN v_result:='INVALID_TOKEN'; EXIT reset_operation; END IF;
+        PERFORM set_config(n,v,true) FROM (VALUES('app.audit_actor','SYSTEM'),('app.current_user_id',''),
+            ('app.operational_driver_id',''),('app.audit_reason','Conclusão de recuperação de senha')) settings(n,v);
+        UPDATE public.users SET password_hash=p_password_hash WHERE id=v_uid;
+        UPDATE public.password_reset_token SET consumed_at=v_now WHERE id=v_token.id;
+        UPDATE public.password_reset_token SET invalidated_at=v_now
+            WHERE user_id=v_uid AND id<>v_token.id AND consumed_at IS NULL AND invalidated_at IS NULL;
+        UPDATE public.auth_session SET revoked_at=clock_timestamp(),revocation_reason='PASSWORD_RESET'
+            WHERE user_id=v_uid AND revoked_at IS NULL;
+        v_result:='OK';
+    END reset_operation;
+    PERFORM set_config(key,coalesce(value,''),true) FROM jsonb_each_text(v_context);
+    RETURN v_result;
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config(key,coalesce(value,''),true) FROM jsonb_each_text(v_context);
+    RAISE;
+END $$;
+REVOKE ALL ON FUNCTION public.issue_password_reset(TEXT,BYTEA,INTERVAL),
+    public.complete_password_reset(BYTEA,TEXT) FROM PUBLIC;
 COMMIT;
