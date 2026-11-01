@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: core-config
+  namespace: olius
+data:
+  SPRING_PROFILES_ACTIVE: prod
+  # Ajuste para o banco preparado e acessível a partir do EKS.
+  DB_URL: jdbc:postgresql://postgres:5432/olius
+  DB_USER: olius_core_api
+  OLIUS_JWT_PRIVATE_KEY_PATH: /etc/olius/jwt/jwt-private.pem
+  OLIUS_JWT_PUBLIC_KEY_PATH: /etc/olius/jwt/jwt-public.pem
+  OLIUS_API_DOCS_ENABLED: "false"
+  OLIUS_STRIPE_ENABLED: "false"
+  OLIUS_ADMIN_INVITATION_EMAIL_ENABLED: "false"
+  OLIUS_ALLOWED_ORIGINS: ""

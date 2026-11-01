@@ -1,0 +1,6 @@
+# Arquivos reais de execução e credenciais permanecem fora do versionamento.
+*.local.yaml
+*.local.yml
+*.env
+secrets/
+rendered*.yaml
