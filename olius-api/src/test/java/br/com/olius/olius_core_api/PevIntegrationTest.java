@@ -995,7 +995,8 @@ class PevIntegrationTest {
         var correction=paths.get("/api/v1/admin/deliveries/{id}/corrections").get("post");
         assertThat(correction.get("summary").asText()).contains("restaurar");
         assertThat(correction.get("responses").has("409")).isTrue();
-        assertThat(paths.has("/api/v1/users/me/deliveries")).isFalse();
+        assertThat(paths.get("/api/v1/users/me/deliveries").get("get").get("security").toString())
+            .contains("bearer");
         for(var entry:Map.of("/api/v1/pevs/me/address","patch",
                 "/api/v1/pevs/me/resubmissions","post").entrySet()) {
             var operation=paths.get(entry.getKey()).get(entry.getValue());
