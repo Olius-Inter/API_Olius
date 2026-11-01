@@ -19,13 +19,18 @@ A resposta contém `accessToken`, `tokenType`, `expiresIn`, `expiresAt`,
 `refreshToken` e `refreshExpiresAt`.
 
 Envie `Authorization: Bearer <accessToken>` nas chamadas autenticadas.
-Armazene credenciais no armazenamento seguro da plataforma e não registre tokens
-em logs. A consulta pública de PEVs dispensa autenticação.
+Mantenha `accessToken` somente em memória e `refreshToken` em Keychain/Keystore
+ou mecanismo seguro equivalente. Não registre tokens em logs.
+A consulta pública de PEVs dispensa autenticação.
 
 Para renovar, envie `{"refreshToken":"<valor-vigente>"}` a
 `POST /api/v1/auth/mobile/refresh`. Substitua os tokens pelos novos valores da resposta;
 o refresh anterior não deve ser reutilizado. Serialize renovações no aplicativo para
-evitar duas chamadas usando o mesmo refresh. Se a renovação falhar, solicite novo login.
+evitar duas chamadas usando o mesmo refresh. Renove automaticamente somente após
+`401` de uma chamada protegida, com uma única tentativa de renovação e repetição
+da chamada original. Não aplique esse mecanismo ao login ou ao próprio refresh.
+Um `401` de login deve ser tratado na tela de autenticação; refresh inválido ou
+reutilizado exige novo login, sem repetir a renovação.
 `POST /api/v1/auth/mobile/logout` encerra a sessão autenticada e retorna `204`.
 
 ## 2. Mostrar o QR do cidadão
@@ -116,7 +121,9 @@ A resposta contém `id`, `pevId`, `citizenId`, volume, datas, `pointsEarned`,
 Os pontos vêm do banco: uma entrega de `3.70` litros rende 3 pontos; `0.75` rende zero.
 Não calcule o saldo definitivo no aplicativo.
 
-Após timeout ou perda da resposta, reenvie a mesma operação com a mesma chave.
+Após timeout ou perda da resposta, reenvie a mesma operação com a mesma chave
+e o mesmo responsável autenticado. A chave é vinculada ao `validatorId` da sessão;
+trocar de conta não recupera a entrega anterior, mesmo usando o mesmo UUID.
 Nunca gere nova chave apenas porque a resposta não chegou. Na recuperação confirmada,
 `qrToken` pode ser omitido e, se enviado, é ignorado; o cidadão original é preservado.
 Se o primeiro envio não tiver confirmado, criar a entrega ainda exige QR válido e PEV aprovado.
@@ -164,7 +171,7 @@ erros de validação podem incluir `errors`. Trate pelo status/código, não pel
 | HTTP | Ação do aplicativo |
 | --- | --- |
 | `400` | Corrigir entrada ou parâmetros; conferir campos em `errors` quando presentes. |
-| `401` | Tentar a renovação de sessão conforme a política acima; se falhar, solicitar login. |
+| `401` | Somente em chamada protegida, tentar uma renovação conforme a política acima. No login, tratar credenciais; no refresh, solicitar novo login sem renovar novamente. |
 | `403` | Reconsultar perfil/situação do PEV e informar falta de permissão; não repetir automaticamente. |
 | `404` | Tratar conforme a operação: próprio PEV ausente, QR não encontrado ou recurso indisponível. |
 | `409` | Conferir `code` e reler o estado. Não trocar a chave de uma entrega incerta para contornar conflito. |

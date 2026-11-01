@@ -108,7 +108,7 @@ Para `ANNULLED`, o contrato não permite editar volume ou data; o DTO deve rejei
 ### Formatos de saída implementados
 
 - **PEV:** `id`, `status`, `address`, `createdAt`; `approvedAt` e dados de responsável somente conforme contexto. A localização pública mostra endereço próprio e coordenadas disponíveis apenas de PEVs aprovados, sem dados pessoais adicionais.
-- **Entrega:** `id`, `pevId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`, `recordStatus`, `revision`. O histórico do PEV deve usar identificador/dados mínimos do beneficiário aprovados para esse contexto.
+- **Entrega (`DeliveryContracts.View`, resposta do POST e do detalhe do PEV):** `id`, `pevId`, `citizenId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`, `recordStatus`, `revision`, `balanceAfter`. A listagem do PEV usa `PevItem`, com `citizenId` e `citizenName`, sem `balanceAfter`; o detalhe administrativo possui representação própria.
 - **Pontos:** `balance` geral e movimentações atuais, sem somar revisões antigas. Pontuação anual de ranking não é sinônimo de saldo geral.
 - **Paginação:** listas usam `items`, `page`, `size` e `totalElements`; pontos usa `movements` e acrescenta `balance`. Padrões 0/20, máximo 100. PEVs ordenam por `createdAt ASC, id ASC`; entregas por `createdAt DESC, id DESC`; pontos por `deliveryDate DESC, id DESC`.
 

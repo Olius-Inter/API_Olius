@@ -158,7 +158,13 @@ class PevIntegrationTest {
             .andExpect(status().isOk()).andReturn();
         String qr=json.readTree(profile.getResponse().getContentAsString()).get("qrToken").asText();
         var date=java.time.Instant.now().minusSeconds(3600);
-        UUID id=UUID.fromString(recordForTest(pev,ownerAccess,qr,"3.70",date));
+        UUID originalKey=UUID.randomUUID();
+        String original=deliveryRequest(originalKey,qr,"3.70",date);
+        var created=mvc.perform(post("/api/v1/pevs/{id}/deliveries",pev)
+            .header("Authorization","Bearer "+ownerAccess)
+            .contentType(MediaType.APPLICATION_JSON).content(original))
+            .andExpect(status().isCreated()).andReturn();
+        UUID id=UUID.fromString(json.readTree(created.getResponse().getContentAsString()).get("id").asText());
         var actor=activeAdmin();
         String deliveries="/api/v1/pevs/"+pev+"/deliveries";
         String administrative="/api/v1/admin/deliveries/"+id;
@@ -172,6 +178,14 @@ class PevIntegrationTest {
             mvc.perform(post(administrative+"/corrections").header("Authorization","Bearer "+actor.access())
                 .contentType(MediaType.APPLICATION_JSON).content(payload))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.revision").value(step+2));
+            mvc.perform(post(deliveries).header("Authorization","Bearer "+ownerAccess)
+                .contentType(MediaType.APPLICATION_JSON).content(original))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.citizenId").value(beneficiary.id().toString()))
+                .andExpect(jsonPath("$.recordStatus").value(states[step]))
+                .andExpect(jsonPath("$.revision").value(step+2))
+                .andExpect(jsonPath("$.balanceAfter").value(points[step]))
+                .andExpect(jsonPath("$.pointsEarned").value(points[step]));
             mvc.perform(get(administrative).header("Authorization","Bearer "+actor.access()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.recordStatus").value(states[step]))
                 .andExpect(jsonPath("$.delivery.pointsEarned").value(points[step]))
