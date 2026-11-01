@@ -78,6 +78,7 @@ class PasswordResetIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired PasswordEncoder passwords;
     @Autowired SecretTokens secrets;
+    @Autowired br.com.olius.olius_core_api.service.SessionTransactions sessions;
     @Autowired TestDelivery delivery;
     @Autowired JdbcTemplate limited;
     @Autowired @Qualifier("passwordResetExecutor") ThreadPoolTaskExecutor executor;
@@ -124,6 +125,43 @@ class PasswordResetIntegrationTest {
         assertThat(owner().queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=?",Integer.class,active.id())).isEqualTo(1);
         assertThat(owner().queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=?",Integer.class,inactive.id())).isZero();
         assertThat(accepted).doesNotContain(active.email(),"token","userId","resetId");
+    }
+
+    @Test void validatedOldCredentialCannotOpenSessionAfterRealPasswordReset() throws Exception {
+        var account=account("CITIZENS");
+        String validatedHash=limited.queryForObject("SELECT password_hash FROM users WHERE id=?",String.class,account.id());
+        assertThat(passwords.matches(OLD,validatedHash)).isTrue();
+        String token=secrets.generate(); seed(account.id(),token,false);
+        complete(token,NEXT,204);
+        String currentHash=limited.queryForObject("SELECT password_hash FROM users WHERE id=?",String.class,account.id());
+        assertThat(currentHash).isNotEqualTo(validatedHash);
+        assertThat(passwords.matches(NEXT,currentHash)).isTrue();
+        // Bean Spring real, transação nova e função PostgreSQL: nenhum retorno é simulado.
+        var outcome=sessions.open(account.id(),secrets.hash(secrets.generate()),validatedHash);
+        assertThat(outcome.code()).isEqualTo("CREDENTIAL_CHANGED");
+        assertThat(outcome.sessionId()).isNull(); assertThat(outcome.expiresAt()).isNull();
+        assertThat(owner().queryForObject("SELECT count(*) FROM auth_session WHERE user_id=?",Integer.class,account.id())).isZero();
+        assertThat(owner().queryForObject("SELECT count(*) FROM auth_refresh_token r JOIN auth_session s ON s.id=r.session_id WHERE s.user_id=?",Integer.class,account.id())).isZero();
+        assertThat(login(account.email(),NEXT).access()).isNotBlank();
+    }
+
+    @Test void accountQuotaBlocksFourthIssuanceInsideFifteenMinutes() throws Exception {
+        var account=account("CITIZENS");
+        for(long minutes:new long[]{2,7,14}) seedIssuedAgo(account.id(),Duration.ofMinutes(minutes));
+        var response=request(account.email(),202); drain();
+        assertThat(response.getResponse().getContentAsString()).doesNotContain(account.email(),"RATE_LIMITED","userId","resetId");
+        assertThat(owner().queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=?",Integer.class,account.id())).isEqualTo(3);
+        assertThat(delivery.messages).doesNotContainKey(account.email());
+    }
+
+    @Test void issuancesOlderThanFifteenMinutesDoNotConsumeAccountQuota() throws Exception {
+        var account=account("CITIZENS");
+        for(long minutes:new long[]{16,17,18}) seedIssuedAgo(account.id(),Duration.ofMinutes(minutes));
+        request(account.email(),202); var message=message(account.email());
+        assertThat(message.email()).isEqualTo(account.email());
+        assertThat(owner().queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=?",Integer.class,account.id())).isEqualTo(4);
+        assertThat(owner().queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=? AND issued_at>clock_timestamp()-interval '15 minutes'",Integer.class,account.id())).isEqualTo(1);
+        assertThat(owner().queryForObject("SELECT bool_and(invalidated_at IS NULL AND consumed_at IS NULL) FROM password_reset_token WHERE user_id=?",Boolean.class,account.id())).isTrue();
     }
 
     @Test void normalizesOnlyDomainAndPreservesLocalCase() throws Exception {
@@ -242,6 +280,10 @@ class PasswordResetIntegrationTest {
             .content(json.writeValueAsString(Map.of("email",email,"password",password))))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         return new Tokens(body.path("accessToken").asText(),body.path("refreshToken").asText());
+    }
+    private void seedIssuedAgo(UUID user,Duration age) {
+        owner().update("INSERT INTO password_reset_token(user_id,token_hash,issued_at,expires_at) VALUES (?,?,clock_timestamp()-?::interval,clock_timestamp()+interval '30 minutes')",
+            user,secrets.hash(secrets.generate()),age.toString());
     }
     private void seed(UUID user,String token,boolean expired) {
         owner().update("INSERT INTO password_reset_token(user_id,token_hash,issued_at,expires_at) VALUES (?,?,clock_timestamp()-interval '40 minutes',clock_timestamp()+?::interval)",user,secrets.hash(token),expired?"-10 minutes":"30 minutes");

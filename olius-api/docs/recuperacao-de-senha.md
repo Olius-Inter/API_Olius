@@ -62,6 +62,10 @@ OLIUS_ADMIN_INVITATION_EMAIL_ENABLED não controla este fluxo. Recuperação hab
 
 Os endpoints têm cotas independentes de 10 chamadas por IP por janela de 15 minutos, por instância, usando o endereço observado no servidor. X-Forwarded-For enviado pelo cliente é ignorado. Ao hospedar atrás de proxy, alinhar o encaminhamento confiável do IP; sem isso vários clientes podem compartilhar a cota do proxy. A memória das cotas tem capacidade limitada. Isso complementa o limite por conta aplicado globalmente pelo PostgreSQL.
 
+O limitador de recuperação comporta 10.000 chaves, contando separadamente solicitação e conclusão. Ao atingir a capacidade, remove janelas vencidas; se todas ainda forem válidas, novas chaves recebem 429, enquanto chaves já conhecidas mantêm sua cota restante. Isso pode impedir temporariamente novos clientes em uma carga distribuída — é uma limitação real de disponibilidade do MVP.
+
+Não descartamos cotas ativas para admitir outra chave: alternar endereços poderia expulsar uma chave com limite esgotado e permitir seu retorno com a cota zerada. Essa política também protege login e cadastro, que reutilizam AuthRateLimiter e não contam com o limite por conta da recuperação. Na hospedagem, complementar com controle de tráfego na borda e monitorar 429; essa infraestrutura não foi implementada nesta revisão. Uma evolução deve preservar cotas ativas e memória limitada, sem confiar em cabeçalhos enviados pelo cliente.
+
 A fila tem dois workers e capacidade de 100 solicitações pendentes por instância. Não é durável: reiniciar/parar a aplicação pode perder solicitações ainda não processadas. Segredos e tarefas não são gravados em disco, Redis ou tabelas extras. O MVP aceita uma nova solicitação do usuário nessas situações.
 
 ## Implantação e verificações
