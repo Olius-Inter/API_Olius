@@ -1096,6 +1096,19 @@ class PevIntegrationTest {
         assertThat(correction.get("responses").has("409")).isTrue();
         assertThat(paths.get("/api/v1/users/me/deliveries").get("get").get("security").toString())
             .contains("bearer");
+        var history=paths.get("/api/v1/users/me/deliveries").get("get");
+        assertThat(history.get("summary").asText()).contains("histórico próprio");
+        assertThat(history.get("description").asText()).contains("deliveryDate DESC, id DESC","ANNULLED");
+        assertThat(history.get("responses").has("200")).isTrue();
+        assertThat(history.get("responses").has("403")).isTrue();
+        var schemas=json.readTree(response.getResponse().getContentAsString()).get("components").get("schemas");
+        assertThat(schemas.get("CitizenDeliveryHistoryPage").get("properties").has("items")).isTrue();
+        var historyItem=schemas.get("CitizenDeliveryHistoryItem").get("properties");
+        for(String field:List.of("id","pevId","oilVolumeLiters","deliveryDate","createdAt",
+                "pointsEarned","recordStatus","revision"))
+            assertThat(historyItem.has(field)).isTrue();
+        for(String hidden:List.of("qrToken","idempotencyKey","validatedBy","balanceAfter"))
+            assertThat(historyItem.has(hidden)).isFalse();
         for(var entry:Map.of("/api/v1/pevs/me/address","patch",
                 "/api/v1/pevs/me/resubmissions","post").entrySet()) {
             var operation=paths.get(entry.getKey()).get(entry.getValue());

@@ -164,6 +164,8 @@ public class OpenApiConfiguration {
     }
 
     private String description(String path, PathItem.HttpMethod method) {
+        if(path.equals("/api/v1/users/me/deliveries"))
+            return "Somente cidadão ativo consulta entregas em que é beneficiário, pela identidade do Bearer. Inclui RECORDED e ANNULLED com volume, datas, pontos, estado e revisão operacional vigentes; não é histórico de auditoria. Retorna 200 com items, page, size e totalElements. Padrões page=0, size=20, máximo 100; ordem deliveryDate DESC, id DESC. Página além do total retorna items vazio e total preservado. Parâmetros vazios, inválidos ou deslocamento acima de Integer.MAX_VALUE retornam 400. ADMIN e estabelecimento recebem 403. Não retorna QR, chave de reenvio ou dados pessoais do responsável. Saldo e revisões de cálculo pertencem a /api/v1/users/me/points.";
         if(path.equals("/api/v1/pevs/me/address"))
             return "Cidadão ou estabelecimento ativo edita somente o endereço do próprio PEV em PENDING ou REJECTED. Corpo: address completo no formato do cadastro; opcionais omitidos ficam nulos. Preserva ID do ponto, endereço, responsável e estado. Retorna 200 com o próprio PEV atualizado. Ausência de PEV retorna 404; estado incompatível retorna 409 BUSINESS_STATE_CONFLICT. Campos inválidos ou desconhecidos retornam 400. Auditoria e edição são transacionais.";
         if(path.equals("/api/v1/pevs/me/resubmissions"))
