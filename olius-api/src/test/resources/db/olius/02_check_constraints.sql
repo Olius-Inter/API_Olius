@@ -991,7 +991,7 @@ ALTER TABLE auth_session
         AND (revoked_at IS NULL OR (isfinite(revoked_at) AND revoked_at >= created_at))),
     ADD CONSTRAINT ck_auth_session_revocation CHECK (
         (revoked_at IS NULL) = (revocation_reason IS NULL));
--- O ENUM limita os três motivos aprovados; não é necessário duplicá-lo em CHECK.
+-- O ENUM limita os motivos aprovados; não é necessário duplicá-lo em CHECK.
 ALTER TABLE auth_refresh_token
     ADD CONSTRAINT ck_auth_refresh_hash CHECK (octet_length(token_hash) = 32),
     ADD CONSTRAINT ck_auth_refresh_generation CHECK (generation > 0),
@@ -1022,3 +1022,18 @@ ALTER TABLE public.admin_invitation
     ADD CONSTRAINT ck_admin_invitation_dates CHECK((accepted_at IS NULL OR (accepted_at>=issued_at AND accepted_at<expires_at)) AND (revoked_at IS NULL OR revoked_at>=issued_at)),
     ADD CONSTRAINT ck_admin_invitation_revoker CHECK(revoked_at IS NOT NULL OR revoked_by IS NULL);
 -- END ADMIN_MANAGEMENT
+
+-- O relógio atual é avaliado pelas rotinas, nunca por CHECK.
+ALTER TABLE public.password_reset_token
+    ADD CONSTRAINT ck_password_reset_hash CHECK(octet_length(token_hash)=32),
+    ADD CONSTRAINT ck_password_reset_dates CHECK(
+        isfinite(issued_at) AND isfinite(expires_at) AND expires_at>issued_at
+        AND (consumed_at IS NULL OR (isfinite(consumed_at) AND consumed_at>=issued_at AND consumed_at<expires_at))
+        AND (invalidated_at IS NULL OR (isfinite(invalidated_at) AND invalidated_at>=issued_at))),
+    ADD CONSTRAINT ck_password_reset_terminal CHECK(NOT(consumed_at IS NOT NULL AND invalidated_at IS NOT NULL));
+ALTER TABLE public.password_reset_token_log
+    ADD CONSTRAINT ck_password_reset_log_snapshot CHECK(
+        (operation='INSERT' AND snapshot_kind='AFTER') OR operation='UPDATE'),
+    ADD CONSTRAINT ck_password_reset_log_actor CHECK(
+        actor_kind='SYSTEM' AND performed_by IS NULL AND operational_driver_id IS NULL),
+    ADD CONSTRAINT ck_password_reset_log_date CHECK(isfinite(performed_at));

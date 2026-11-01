@@ -58,7 +58,7 @@ class AuthNonSuperuserInstallationTest {
             }
             connection.setAutoCommit(false);
             statement.execute("SELECT set_config('app.audit_actor','EXTERNAL',true)");
-            for (String call : new String[]{"SELECT * FROM open_auth_session(NULL,NULL)",
+            for (String call : new String[]{"SELECT * FROM open_auth_session(NULL,NULL,NULL)",
                     "SELECT * FROM rotate_auth_refresh_token(NULL,NULL)",
                     "SELECT revoke_auth_session(NULL,NULL)", "SELECT * FROM revoke_user_auth_sessions(NULL)"}) {
                 statement.execute(call);

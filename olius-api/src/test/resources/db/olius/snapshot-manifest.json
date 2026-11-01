@@ -1,31 +1,31 @@
 {
   "source": "DB_Segundo/PostgreSQL",
-  "reviewed_at": "2026-10-31",
+  "reviewed_at": "2026-11-01",
   "files": [
     {
       "file": "01_structure.sql",
-      "sha256": "68f299a1e7cb68b6f4ceb26d83dd7a4702f0654217b0360364b3fc17f5803cb1",
-      "source_sha256": "47bc5582b16ec87e85c2dc285aa68b063d40f581d1581de150a4b85feacf7979"
+      "sha256": "3a69a7cbe7c54cbe819ef28c7c1498195e3623a7228062952a0f0e191d65b61e",
+      "source_sha256": "3a69a7cbe7c54cbe819ef28c7c1498195e3623a7228062952a0f0e191d65b61e"
     },
     {
       "file": "02_check_constraints.sql",
-      "sha256": "4ca4878512072d515bc486ebf435c5151a6c648cf166c7c5524164fa684f2251",
-      "source_sha256": "fc8d5ec45af3305c8c4e6fc585e58079d1a828a91aab1108900c0cae4379acbf"
+      "sha256": "6a10fc5c952c9d672da1a6bf5e9bb308af402b930db1e6263cd1012021870e69",
+      "source_sha256": "7df9c3ada6877b3ebd55aaad5a65baec8e8b259e749281e9311e843df2d0191d"
     },
     {
       "file": "03_indexes.sql",
-      "sha256": "88d06ed6a88eb6ddc64b1ec4f64355307dcbd1ccbefba8d57812c62587854f56",
-      "source_sha256": "17a8a028ad7689ceddbd80ee0f78dccb25eabdac1a8da5045d35513bb35f3212"
+      "sha256": "1d7ec1b483f56cabf9c697177d01b4f1d48c8428961dfdc91b65899c7bc77c1f",
+      "source_sha256": "d7d83b84d4f5ad1038630105a135c7938063966c783acc66ca8e9811cb8e2276"
     },
     {
       "file": "04_functions_procedures.sql",
-      "sha256": "ebf3d699f879aeec12c3f82d3d530fb96e3b222aea45ff47742c20bb8864194e",
-      "source_sha256": "c4f4aa7cfce460960fac67901c8dc93aeeff9394f59d891296e1f66543ff069a"
+      "sha256": "11070bb020449b3893b1e1b70c4493ee7fcd753e36960e0bf164972a3c3193b5",
+      "source_sha256": "90d02b70462ea30ffd74597085392a6d39d2fd0c10c6fd9011c3c4715666c1ba"
     },
     {
       "file": "05_triggers.sql",
-      "sha256": "2cb54a35cc63d27e14dd0bb1c52a1378706bb5ad3ed06c43e79027ae2ab635cb",
-      "source_sha256": "95dafc54bc2913f93def8bd4b66ea83e2ed7de691509c2c1dfd428486fda6275"
+      "sha256": "380e8c00adea38c5037ad0b9e42baa4e58192f107692a48f04029c84d8d467fd",
+      "source_sha256": "380e8c00adea38c5037ad0b9e42baa4e58192f107692a48f04029c84d8d467fd"
     },
     {
       "file": "06_ctes.sql",
@@ -44,8 +44,8 @@
     },
     {
       "file": "access_control/01_roles.sql",
-      "sha256": "77934cd7869c3f42604595d11bc1fa3fc72a23400a800a9a37da6b190783fffe",
-      "source_sha256": "50d6167d356ba5321e656c2ca78aaa7883ac47f1d50658bacf08f1b2a508dadc"
+      "sha256": "24175950a6fa7a2c5e835405ec4696a7a4b6273926eb88a1b489f01c62535a02",
+      "source_sha256": "50b431aa9ee70a7ccb6d1b00506234da14851d0d04586c46634c84006c6694dd"
     },
     {
       "file": "data_catalog/01_structure.sql",
@@ -64,13 +64,13 @@
     },
     {
       "file": "data_catalog/04_load.sql",
-      "sha256": "7dc0031d7f40cf0dcab456ef13d72811b5e5c54d47d57395cab3c5a312182455",
-      "source_sha256": "dc7deb0968cdc130176cb1fe6652302478392363dca2709d4d9bc0bcede7d8e2"
+      "sha256": "4a1d01addb8207f5e203db1477ae1d52b208ca836b9885fdff33a685fc5b9879",
+      "source_sha256": "882656c636438e05c5e4883c6e926b4d8bbabf482294d8ddce434f459fd04562"
     },
     {
       "file": "data_catalog/05_validate.sql",
-      "sha256": "2e1e1454d40394a2f11bea215b72454dc751c39fe74179a85d1402a851174443",
-      "source_sha256": "790437aa04e983fe5d279277a57c928ec5a066d93849f4e72a5b474a0a3a04d6"
+      "sha256": "57747d180d366510423770ea1d01dc1ee71502199b748af2dac34543a91202fc",
+      "source_sha256": "1c93cb12959e20fc35fab9f1c3c0096ae893a1e8816e98f63a2435b6a58d7341"
     },
     {
       "file": "initial_data/01_reference_data.sql",
@@ -87,7 +87,9 @@
     "Snapshot completo de instalação e contratos administrativos; funções de autenticação preservam a restauração do contexto de auditoria.",
     "initial_data é recurso de teste explícito: não é carregado automaticamente pela fixture nem em produção.",
     "Banco Aiven identificado como PostgreSQL 18.6; matriz configurada para validar PostgreSQL 16.15 e 18.6.",
-    "Sprint 9: visita sem atendimento por ADMIN; assinatura normal preservada, núcleo privado e migração revisados. Snapshot não executa migração no ambiente instalado."
+    "Sprint 9: visita sem atendimento por ADMIN; assinatura normal preservada, núcleo privado e migração revisados. Snapshot não executa migração no ambiente instalado.",
+    "Recuperação de senha: contrato open_auth_session(uuid,bytea,text), tokens próprios e revogação PASSWORD_RESET; migração real não é executada pela fixture."
   ],
-  "hash_format": "sha256 usa bytes UTF-8 com finais de linha LF; source_sha256 registra os bytes do arquivo oficial revisado."
+  "hash_format": "sha256 usa bytes UTF-8 com finais de linha LF; source_sha256 registra os bytes do arquivo oficial revisado.",
+  "source_commit": "7e6ed3c5942b37f7fb9aa88e0d07124374b87351"
 }

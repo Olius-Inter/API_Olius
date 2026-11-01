@@ -1311,7 +1311,7 @@ ALTER TABLE certificate_log
 
 -- SESSÕES DE AUTENTICAÇÃO. Papéis e permissões: entrega data_catalog.
 
-CREATE TYPE auth_revocation_reason_t AS ENUM ('LOGOUT', 'ACCOUNT_INACTIVE', 'REFRESH_REUSE');
+CREATE TYPE auth_revocation_reason_t AS ENUM ('LOGOUT', 'ACCOUNT_INACTIVE', 'REFRESH_REUSE', 'PASSWORD_RESET');
 
 CREATE TABLE auth_session (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1447,3 +1447,47 @@ COMMENT ON COLUMN public.admin_invitation_log.operational_driver_id IS 'Motorist
 COMMENT ON COLUMN public.admin_invitation_log.audit_reason IS 'Justificativa administrativa, sem tokens ou senhas.';
 COMMENT ON COLUMN public.admin_invitation_log.changed_columns IS 'Nomes dos campos alterados, sem valores sigilosos.';
 -- END ADMIN_MANAGEMENT
+
+-- PASSWORD_RESET: tokens próprios, sem segredo original ou histórico de senhas.
+CREATE TABLE public.password_reset_token (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    token_hash BYTEA NOT NULL,
+    issued_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    invalidated_at TIMESTAMPTZ,
+    CONSTRAINT uq_password_reset_hash UNIQUE(token_hash),
+    CONSTRAINT fk_password_reset_user FOREIGN KEY(user_id) REFERENCES public.users(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+COMMENT ON TABLE public.password_reset_token IS 'Hashes SHA-256 de recuperação; uso único, limites por conta e invalidação conjunta no sucesso. Sem limpeza automática.';
+COMMENT ON COLUMN public.password_reset_token.id IS 'Identidade interna da emissão; não é o segredo entregue por e-mail.';
+COMMENT ON COLUMN public.password_reset_token.user_id IS 'Conta destinatária; apenas contas ACTIVE podem emitir/concluir.';
+COMMENT ON COLUMN public.password_reset_token.token_hash IS 'SHA-256 de 32 bytes; nunca copiar para logs ou respostas HTTP.';
+COMMENT ON COLUMN public.password_reset_token.issued_at IS 'Relógio do servidor obtido após o bloqueio da conta; base da janela móvel.';
+COMMENT ON COLUMN public.password_reset_token.expires_at IS 'Prazo congelado da emissão; padrão de 30 minutos, informado pela Core.';
+COMMENT ON COLUMN public.password_reset_token.consumed_at IS 'Conclusão bem-sucedida, dentro do prazo. Terminal e exclusivo de invalidated_at.';
+COMMENT ON COLUMN public.password_reset_token.invalidated_at IS 'Invalidação por outra recuperação concluída; pode atingir tokens já expirados.';
+
+-- Auditoria limitada aos metadados da emissão e às transições, sem token_hash.
+CREATE TABLE public.password_reset_token_log (
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    issued_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    invalidated_at TIMESTAMPTZ,
+    audit_event_id UUID NOT NULL,
+    snapshot_kind public.audit_snapshot_t NOT NULL,
+    operation public.operation_status_t NOT NULL,
+    performed_at TIMESTAMPTZ NOT NULL,
+    performed_by UUID,
+    actor_kind public.audit_actor_t NOT NULL,
+    operational_driver_id UUID,
+    audit_reason TEXT,
+    changed_columns TEXT[] NOT NULL,
+    CONSTRAINT uq_password_reset_log_snapshot UNIQUE(audit_event_id,id,snapshot_kind)
+);
+COMMENT ON TABLE public.password_reset_token_log IS 'Auditoria de emissão, consumo e invalidação. Não possui hash de token ou senha; eventos públicos usam SYSTEM.';
