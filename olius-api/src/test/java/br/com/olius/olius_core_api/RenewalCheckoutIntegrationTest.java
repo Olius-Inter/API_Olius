@@ -122,7 +122,10 @@ class RenewalCheckoutIntegrationTest {
         assertThat(cycleSnapshot()).isEqualTo(before);
         var next=owner.queryForMap("SELECT starts_at,ends_at,monthly_price,volume_limit_liters,collection_limit FROM subscription_cycle WHERE subscription_id=? AND cycle_number=2",subscription);
         assertThat(((Timestamp)next.get("starts_at")).toInstant()).isEqualTo(ends);
-        assertThat(((Timestamp)next.get("ends_at")).toInstant()).isEqualTo(ends.atZone(ZoneId.of("America/Sao_Paulo")).plusMonths(1).toInstant());
+        // Derivar da âncora original: o fim intermediário pode ter sido limitado
+        // ao último dia de um mês curto (31/out -> 30/nov -> 31/dez).
+        assertThat(((Timestamp)next.get("ends_at")).toInstant())
+            .isEqualTo(starts.atZone(ZoneId.of("America/Sao_Paulo")).plusMonths(2).toInstant());
         assertThat((BigDecimal)next.get("monthly_price")).isEqualByComparingTo("19.90");
         assertThat((BigDecimal)next.get("volume_limit_liters")).isEqualByComparingTo("50");
         assertThat(next.get("collection_limit")).isEqualTo(2);
@@ -169,7 +172,7 @@ class RenewalCheckoutIntegrationTest {
         "29,2033-01-29,2033-02-28", "30,2033-01-30,2033-02-28", "31,2033-01-31,2033-02-28",
         "29,2032-01-29,2032-02-29", "30,2032-01-30,2032-02-29", "31,2032-01-31,2032-02-29",
         "29,2033-02-28,2033-03-29", "30,2033-02-28,2033-03-30", "31,2033-02-28,2033-03-31",
-        "31,2033-04-30,2033-05-31"
+        "31,2033-04-30,2033-05-31", "31,2033-11-30,2033-12-31"
     })
     void calendarPreservesCivilAnchorThroughFebruaryAndThirtyDayMonths(int anchor,String endDate,String expectedDate) {
         ZoneId zone=ZoneId.of("America/Sao_Paulo");
