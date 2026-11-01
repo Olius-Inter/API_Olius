@@ -1,3 +1,5 @@
+-- HISTÓRICO: somente contrato de login com dois parâmetros. Não reaplicar após recuperação de senha.
+-- A verificação de versão recusa o contrato novo; usar a migração oficial do banco.
 -- Atualização pontual para banco já instalado. Fonte: DB_Segundo f1a7bff.
 -- Revisar/backup e interromper tráfego antes da implantação. Executar como conta
 -- de implantação autorizada, fora de outra transação; nunca pela conta da Core.

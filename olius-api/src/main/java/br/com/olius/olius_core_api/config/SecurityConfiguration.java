@@ -59,7 +59,7 @@ public class SecurityConfiguration {
                     .requestMatchers(HttpMethod.POST,"/api/v1/operations/b2b/context",
                         "/api/v1/operations/b2b/requests/*/arrival","/api/v1/operations/b2b/requests/*/collection").permitAll()
                     .requestMatchers(HttpMethod.POST,"/api/v1/auth/registrations/citizens","/api/v1/auth/registrations/establishments",
-                        "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh","/api/v1/auth/admin-invitations/acceptance").permitAll()
+                        "/api/v1/auth/web/login","/api/v1/auth/web/refresh","/api/v1/auth/web/logout","/api/v1/auth/mobile/login","/api/v1/auth/mobile/refresh","/api/v1/auth/admin-invitations/acceptance","/api/v1/auth/password-reset-requests","/api/v1/auth/password-resets").permitAll()
                     .requestMatchers(HttpMethod.GET,"/api/v1/auth/web/csrf","/api/v1/establishment-types","/api/v1/subscription-plans","/api/v1/pevs",
                         "/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll()
                     .requestMatchers("/api/v1/billing/**","/api/v1/collection-requests/**","/api/v1/collections/**","/api/v1/establishments/me/score").hasRole("ESTABLISHMENT")
@@ -67,6 +67,7 @@ public class SecurityConfiguration {
                     .anyRequest().authenticated())
                 .addFilterAt(bearer, BearerTokenAuthenticationFilter.class)
                 .addFilterBefore(new DatabaseSecurityFailureFilter(factory,translator,mapper),BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(new PasswordResetRateLimitFilter(new AuthRateLimiter(10,10000,java.time.Clock.systemUTC(),java.time.Duration.ofMinutes(15)),factory,mapper),BearerTokenAuthenticationFilter.class)
                 .addFilterBefore(new AuthRateLimitFilter(limiter,factory,mapper),BearerTokenAuthenticationFilter.class);
             return http.build();
         } catch (Exception failure) {

@@ -11,7 +11,7 @@ public class SessionTransactions {
     private final AuthSessionRepository sessions;
     public SessionTransactions(AuthSessionRepository sessions) { this.sessions=sessions; }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
-    public Outcome open(UUID userId,byte[] hash) { return sessions.open(userId,hash); }
+    public Outcome open(UUID userId,byte[] hash,String validatedHash) { return sessions.open(userId,hash,validatedHash); }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public Outcome rotate(byte[] current,byte[] next) { return sessions.rotate(current,next); }
     @Transactional(propagation=Propagation.REQUIRES_NEW)

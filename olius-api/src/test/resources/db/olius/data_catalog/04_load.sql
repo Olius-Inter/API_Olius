@@ -163,6 +163,43 @@ FROM policies p
 WHERE d.schema_name = current_schema() AND d.table_name = p.table_name
   AND d.access_policy = p.previous_policy;
 
+-- Recuperação de senha: metadados apenas; nunca valores das credenciais.
+WITH reset_seed(schema_name,table_name,domain_name,description,business_rules,access_policy,access_status,source_reference) AS (VALUES('public','password_reset_token','Autenticação e sessões','Emissões de recuperação de senha independentes de sessões e convites.',
+    'Conta ativa; 3 emissões/15 minutos, intervalo mínimo de 60 segundos; consumo único e invalidação das demais no sucesso.',
+    'Core somente EXECUTE; olius_auth_owner opera os tokens; leitores, Redis e BI sem acesso.','DEFINED','PASSWORD_RESET.md'),
+('public','password_reset_token_log','Auditoria','Metadados auditáveis de emissão, consumo e invalidação, sem hashes.',
+    'Eventos públicos SYSTEM sem autor administrativo; BEFORE/AFTER correlacionados no UPDATE.',
+    'Somente auditor e manutenção consultam; escrita pela trigger, sem acesso direto da Core.','DEFINED','PASSWORD_RESET.md')
+)
+INSERT INTO public.data_catalog_table(schema_name,table_name,domain_name,description,business_rules,access_policy,access_status,source_reference)
+SELECT s.* FROM reset_seed s JOIN pg_catalog.pg_namespace n ON n.nspname=s.schema_name
+JOIN pg_catalog.pg_class c ON c.relnamespace=n.oid AND c.relname=s.table_name AND c.relkind IN ('r','p')
+ON CONFLICT(schema_name,table_name) DO NOTHING;
+INSERT INTO public.data_catalog_column(table_catalog_id,column_name,description,business_rules,documentation_status,source_reference)
+SELECT d.id,a.attname,coalesce(col_description(c.oid,a.attnum),CASE a.attname
+    WHEN 'log_id' THEN 'Identificador único do snapshot de auditoria.'
+    WHEN 'id' THEN 'Identificador interno da emissão de recuperação.'
+    WHEN 'user_id' THEN 'Usuário destinatário da recuperação; não comprova autoria.'
+    WHEN 'issued_at' THEN 'Instante original da emissão, usado na janela móvel.'
+    WHEN 'expires_at' THEN 'Expiração congelada da emissão.'
+    WHEN 'consumed_at' THEN 'Instante da recuperação concluída com este token.'
+    WHEN 'invalidated_at' THEN 'Instante da invalidação por outra recuperação.'
+    WHEN 'audit_event_id' THEN 'Correlação dos snapshots BEFORE/AFTER da mesma alteração.'
+    WHEN 'snapshot_kind' THEN 'Estado anterior ou posterior à operação.'
+    WHEN 'operation' THEN 'Operação de inserção ou atualização auditada.'
+    WHEN 'performed_at' THEN 'Instante de gravação do snapshot.'
+    WHEN 'performed_by' THEN 'Nulo em operações públicas de recuperação.'
+    WHEN 'actor_kind' THEN 'SYSTEM nas operações públicas de recuperação.'
+    WHEN 'operational_driver_id' THEN 'Sempre nulo; motoristas não possuem login.'
+    WHEN 'audit_reason' THEN 'Motivo controlado pela rotina; nunca contém segredos.'
+    WHEN 'changed_columns' THEN 'Nomes das colunas alteradas, sem seus valores.' END),
+    NULL,'DOCUMENTED','PASSWORD_RESET.md; scripts 01–05'
+FROM public.data_catalog_table d JOIN pg_namespace n ON n.nspname=d.schema_name
+JOIN pg_class c ON c.relnamespace=n.oid AND c.relname=d.table_name
+JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
+WHERE d.schema_name='public' AND d.table_name IN ('password_reset_token','password_reset_token_log')
+ON CONFLICT(table_catalog_id,column_name) DO NOTHING;
+
 -- Tabelas futuras são descobertas, sem inventar sua finalidade ou acesso.
 INSERT INTO data_catalog_table
     (schema_name, table_name, domain_name, description, business_rules, access_policy, source_reference)
@@ -1163,4 +1200,10 @@ WHERE dc.table_catalog_id=dt.id AND dc.column_name=a.attname AND dt.schema_name=
 UPDATE public.data_catalog_table SET description='Catálogo de motivos: inclui ESTABLISHMENT_CLOSED e NO_RESPONSIBLE_AVAILABLE exclusivos da visita administrativa sem aceite; não cria penalidades adicionais por motivo.'
 WHERE schema_name='public' AND table_name='collection_failure_reason'
 AND description='Catálogo dos motivos de malsucesso, sem criar penalidades adicionais por motivo.';
+UPDATE public.data_catalog_column c SET description=replace(c.description,
+    'LOGOUT, ACCOUNT_INACTIVE ou REFRESH_REUSE',
+    'LOGOUT, ACCOUNT_INACTIVE, REFRESH_REUSE ou PASSWORD_RESET')
+FROM public.data_catalog_table t WHERE c.table_catalog_id=t.id AND t.schema_name='public'
+    AND t.table_name IN ('auth_session','auth_session_log') AND c.column_name='revocation_reason'
+    AND position('LOGOUT, ACCOUNT_INACTIVE ou REFRESH_REUSE' IN c.description)>0;
 COMMIT;

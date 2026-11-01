@@ -32,11 +32,12 @@ public class AuthenticationService {
     }
     public Tokens login(Login request) {
         var user=users.findByEmail(EmailAddress.normalize(request.email()));
-        boolean matches=passwords.matches(request.password(),user.map(u -> u.getPasswordHash()).orElse(dummyHash));
+        String validatedHash=user.map(u -> u.getPasswordHash()).orElse(dummyHash);
+        boolean matches=passwords.matches(request.password(),validatedHash);
         if(!matches || user.isEmpty() || user.get().getStatus()!=UserStatus.ACTIVE)
             throw new BadCredentialsException("Credenciais inválidas");
         String refresh=secrets.generate();
-        Outcome outcome=sessions.open(user.get().getId(),secrets.hash(refresh));
+        Outcome outcome=sessions.open(user.get().getId(),secrets.hash(refresh),validatedHash);
         return issue(outcome,refresh);
     }
     public Tokens refresh(String current) {

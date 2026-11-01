@@ -226,3 +226,12 @@ CREATE INDEX idx_admin_invitation_revoker ON public.admin_invitation(revoked_by)
 -- temporal. O índice por motivo não permite buscar diretamente essa faixa.
 CREATE INDEX idx_collection_failure_log_revision_window
     ON public.collection_failure_log (collection_id, performed_at);
+
+-- A chave inicial atende FK, invalidação por conta e janela móvel de emissões.
+CREATE INDEX idx_password_reset_user_issued ON public.password_reset_token(user_id,issued_at DESC);
+CREATE INDEX idx_password_reset_log_history ON public.password_reset_token_log(id,performed_at DESC);
+
+
+-- Lookup preserva caixa local e normaliza só domínio; UNIQUE(email) não indexa essas expressões.
+CREATE INDEX idx_users_password_reset_email ON public.users
+    ((split_part(email,'@',1)),(lower(split_part(email,'@',2))));
