@@ -149,6 +149,37 @@ de `config --quiet`. Este fluxo é só para inicialização planejada de banco:
 não execute `up` nem remova volumes do banco já preparado para testar senhas.
 Alterar o arquivo não troca a senha de um volume existente.
 
+## Teste reproduzível da imagem com banco descartável
+
+Na pasta `olius-api`, execute com PowerShell 7 e Docker Desktop iniciado:
+
+```powershell
+pwsh -NoProfile -File scripts/Test-DockerSmoke.ps1
+```
+
+O script constrói uma imagem própria do teste, cria uma rede e um PostgreSQL
+descartável, aplica os scripts oficiais de `src/test/resources/db/olius` na
+mesma ordem do fixture `OfficialPostgres` e cria um login exclusivo com o grupo
+`olius_api`, sem privilégios administrativos. A API usa esse login no perfil
+local e uma porta aleatória publicada apenas no localhost. O teste aguarda
+`GET /api/v1/establishment-types` retornar HTTP 200 e confirma a mensagem de
+inicialização do Spring. Não utiliza `.env` ou bancos reais.
+
+As credenciais são geradas em memória e os containers, a rede, o volume anônimo
+do PostgreSQL e a imagem exclusiva são removidos no encerramento normal ou
+em erro pelo bloco `finally`. Se o processo for terminado à força, confira os
+recursos com prefixo `olius-smoke-` antes de removê-los manualmente.
+
+Para repetir em outra versão da matriz de compatibilidade:
+
+```powershell
+pwsh -NoProfile -File scripts/Test-DockerSmoke.ps1 -PostgresImage postgres:18.6
+```
+
+Esse teste complementa a suíte Java: build da imagem, inicialização real no
+container, validação do schema pelo Hibernate e consulta pública pelo usuário
+limitado. Ele não substitui os testes Java nem valida a configuração de produção.
+
 ## AWS posteriormente
 
 Use o perfil `prod`, as variáveis `DB_URL`, `DB_USER` e `DB_PASSWORD` e monte as
