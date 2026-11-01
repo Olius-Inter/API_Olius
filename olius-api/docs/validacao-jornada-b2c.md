@@ -51,6 +51,24 @@ Editar em `APPROVED`/`INACTIVE` e reapresentar fora de `REJECTED` devem retornar
 `409 BUSINESS_STATE_CONFLICT`. Duas reapresentações simultâneas devem produzir
 um sucesso e um conflito, sem novo PEV ou endereço. Conferir auditoria com o titular.
 
+## Histórico próprio de entregas
+
+Com dois cidadãos beneficiários e um responsável por PEV cidadão, registrar entregas
+para cada beneficiário. Consultar `/api/v1/users/me/deliveries` com cada sessão:
+somente as entregas realizadas pelo titular devem aparecer. O responsável não deve
+receber no histórico pessoal as entregas recebidas no ponto. ADMIN e estabelecimento
+recebem `403`; ausência de sessão ou conta inativa recebe `401`.
+
+Conferir volume, data física, criação, PEV, pontos, estado e revisão operacional.
+Após correção, anulação e restauração, consultar novamente: a mesma entrega aparece
+uma única vez com dados vigentes; anulada mantém dados físicos e zero pontos.
+Saldo permanece na consulta de pontos. Não expor QR, chave de reenvio ou validador.
+
+Com três entregas, duas na mesma data física, conferir ordenação `deliveryDate DESC,
+id DESC`, padrões 0/20 e páginas consecutivas com `size=1`, sem duplicatas. Página
+além do total deve ser vazia e preservar `totalElements`. Verificar `400` para
+parâmetros vazios/inválidos e deslocamento acima de `Integer.MAX_VALUE`.
+
 ## Paginação e falhas
 
 Nas consultas de entregas do PEV, entregas administrativas e pontos, criar pelo
@@ -74,8 +92,8 @@ Com Java 21 e Docker Desktop disponíveis, executar dentro de `olius-api`:
 ```
 
 O comando executa a suíte e gera o relatório JaCoCo em `target/site/jacoco`.
-Na verificação local da manutenção do próprio PEV, em 01/11/2026, o comando
-concluiu com `BUILD SUCCESS`: 545 testes, zero falhas, zero erros e zero ignorados.
+Na verificação local do histórico próprio de entregas, em 01/11/2026, o comando
+concluiu com `BUILD SUCCESS`: 548 testes, zero falhas, zero erros e zero ignorados.
 O Surefire registrou encerramento forçado do processo de testes após o prazo de
 30 segundos de desligamento; isso ocorreu após os testes e não impediu o build,
 o empacotamento ou a geração do relatório. O aviso permanece para acompanhamento
@@ -87,8 +105,8 @@ pelo Sonar no CI; um build local aprovado não substitui essa avaliação.
 
 ## Limites do aceite
 
-Este roteiro valida a jornada disponível. Não declara implementados histórico próprio
-completo de entregas ou busca geográfica por distância/área. Essas capacidades estão registradas
+Este roteiro valida a jornada disponível. Não declara implementada busca geográfica
+por distância/área. Essa capacidade está registrada
 no [inventário](jornada-b2c.md) para etapas próprias.
 
 A integração do ranking pela API Redis e a conferência da revisão oficial do banco

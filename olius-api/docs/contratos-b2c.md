@@ -46,7 +46,7 @@ As rotas abaixo estão implementadas, exceto as linhas marcadas como **não impl
 | Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo; transições administrativas permitidas. `200` com detalhe atualizado. |
 | Identificar cidadão por QR | `POST /api/v1/qr/resolutions` | Responsável ativo por PEV `APPROVED`; token no corpo, identificação mínima do cidadão ativo. A leitura não altera o token nem registra entrega. |
 | Registrar ou recuperar entrega | `POST /api/v1/pevs/{id}/deliveries` | Responsável autenticado do PEV; criação exige PEV aprovado e QR vigente. Recuperação por chave de entrega já confirmada segue a seção de idempotência. `201` na criação e `200` na recuperação, sob bloqueio transacional por chave interna. |
-| Histórico próprio | Proposta: `GET /api/v1/users/me/deliveries` | **Não implementada.** Movimentações de pontos não substituem histórico completo de entregas. |
+| Histórico próprio | `GET /api/v1/users/me/deliveries` | Cidadão ativo; entregas em que é beneficiário, com dados e revisão operacional vigentes, incluindo anuladas. `200` paginado, sem saldo. |
 | Entregas do PEV | `GET /api/v1/pevs/{id}/deliveries` | Responsável ativo do PEV; ID e nome do beneficiário, sem documento, contato ou QR. `page=0`, `size=20` por padrão, máximo 100; ordem `createdAt DESC, id DESC`. |
 | Detalhe da entrega | `GET /api/v1/pevs/{id}/deliveries/{deliveryId}` | Responsável ativo do PEV; consulta o recurso indicado pelo `Location` da criação. Entrega de outro PEV retorna `404`. |
 | Listar/detalhar entregas para gestão | `GET /api/v1/admin/deliveries` e `GET /api/v1/admin/deliveries/{id}` | ADMIN; lista paginada e detalhe, incluindo estado e revisão vigentes. |
@@ -146,11 +146,10 @@ Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entr
 
 ## 5. Autorização e transações
 
-### Histórico próprio de entregas — contrato para implementação
+### Histórico próprio de entregas implementado
 
-Task `86e3xqabw`. Implementar `GET /api/v1/users/me/deliveries`, capacidade já
-prevista acima. Esta seção define a representação inicial para integração; a rota
-continua pendente até os próximos commits e deve ser conciliada com o consumidor.
+Task `86e3xqabw`. `GET /api/v1/users/me/deliveries` está implementado e documentado
+no OpenAPI e no guia Mobile. Esta seção descreve a representação disponível.
 
 Somente cidadão ativo consulta suas entregas como beneficiário. A identidade vem
 da sessão e filtra `delivery_pev.citizen_id`; não aceitar ID de cidadão fornecido

@@ -30,6 +30,7 @@ O Mobile consome os contratos HTTP; não chama procedures nem acessa o banco.
 | Registrar ou recuperar entrega | `POST /api/v1/pevs/{pevId}/deliveries` | Responsável registra volume aceito e data física; `201` cria, `200` recupera operação confirmada. |
 | Consultar entregas recebidas | `GET /api/v1/pevs/{pevId}/deliveries` e `GET /api/v1/pevs/{pevId}/deliveries/{deliveryId}` | Responsável ativo consulta somente entregas do próprio PEV. |
 | Consultar pontos | `GET /api/v1/users/me/points` | Cidadão consulta saldo geral e movimentações vigentes de entregas. |
+| Consultar histórico próprio | `GET /api/v1/users/me/deliveries` | Cidadão ativo; entregas realizadas, registradas e anuladas, com dados vigentes e paginação por data física e ID decrescentes. Sem saldo ou snapshots antigos. |
 | Consultar entregas para gestão | `GET /api/v1/admin/deliveries` e `GET /api/v1/admin/deliveries/{id}` | ADMIN ativo consulta estado, revisão e efeitos vigentes. |
 | Corrigir, anular ou restaurar | `POST /api/v1/admin/deliveries/{id}/corrections` | ADMIN ativo informa justificativa e revisão esperada; banco audita e recalcula na mesma transação. |
 
@@ -59,7 +60,6 @@ O Mobile consome os contratos HTTP; não chama procedures nem acessa o banco.
 
 | Capacidade prevista | Estado no código | Consequência para o consumidor |
 | --- | --- | --- |
-| Histórico próprio de entregas | Não existe `GET /api/v1/users/me/deliveries`. | `/users/me/points` fornece movimentações de pontos, sem substituir um histórico completo de entregas com volume e estado. |
 | Busca geográfica do mapa | A listagem pública não possui contrato de consulta por distância ou área. | Coordenadas disponíveis podem ser exibidas; filtros geográficos dependem de alinhamento. |
 
 Essas lacunas não devem ser ocultadas por documentação nem por endpoints fictícios.
