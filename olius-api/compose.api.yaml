@@ -1,0 +1,15 @@
+name: olius-api-local
+
+services:
+  core:
+    image: olius-core:v1
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      CONTAINER_DEV_URL: ${DOCKER_CORE_DB_URL:?Defina DOCKER_CORE_DB_URL com o endereco do banco acessivel pelo container}
+      CONTAINER_DEV_USER: ${CONTAINER_DEV_USER:?Defina CONTAINER_DEV_USER no .env}
+      CONTAINER_DEV_PASSWORD: ${CONTAINER_DEV_PASSWORD:?Defina CONTAINER_DEV_PASSWORD no .env}
+      OLIUS_ALLOWED_ORIGINS: ${OLIUS_ALLOWED_ORIGINS:-}
