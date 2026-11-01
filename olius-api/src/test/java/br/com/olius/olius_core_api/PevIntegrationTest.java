@@ -205,6 +205,14 @@ class PevIntegrationTest {
                 .andExpect(jsonPath("$.movements.length()").value(1))
                 .andExpect(jsonPath("$.movements[0].deliveryId").value(id.toString()))
                 .andExpect(jsonPath("$.movements[0].points").value(points[step]));
+            mvc.perform(get("/api/v1/users/me/deliveries").header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(id.toString()))
+                .andExpect(jsonPath("$.items[0].oilVolumeLiters").value(step==2 ? 2.75 : 5.25))
+                .andExpect(jsonPath("$.items[0].pointsEarned").value(points[step]))
+                .andExpect(jsonPath("$.items[0].recordStatus").value(states[step]))
+                .andExpect(jsonPath("$.items[0].revision").value(step+2));
         }
     }
 
@@ -411,6 +419,45 @@ class PevIntegrationTest {
         admin().update("UPDATE users SET status='INACTIVE' WHERE id=?",citizen.id());
         mvc.perform(get(route).header("Authorization","Bearer "+access))
             .andExpect(status().isUnauthorized());
+    }
+
+    @Test void ownDeliveryHistoryPaginatesInDateAndIdOrderAndRejectsInvalidParameters() throws Exception {
+        var owner=citizen();var beneficiary=citizen();
+        String access=login(owner.email()),citizenAccess=login(beneficiary.email());
+        UUID pev=approvedDeliveryPev(owner,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(3600);
+        String older=recordForTest(pev,access,qr,"1.00",date.minusSeconds(60));
+        String tiedFirst=recordForTest(pev,access,qr,"2.00",date);
+        String tiedSecond=recordForTest(pev,access,qr,"3.00",date);
+        var tied=List.of(tiedFirst,tiedSecond).stream().sorted(java.util.Comparator.reverseOrder()).toList();
+        var expected=List.of(tied.get(0),tied.get(1),older);
+        String route="/api/v1/users/me/deliveries";
+        mvc.perform(get(route).header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(0))
+            .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(3))
+            .andExpect(jsonPath("$.items.length()").value(3))
+            .andExpect(jsonPath("$.items[0].id").value(expected.get(0)))
+            .andExpect(jsonPath("$.items[1].id").value(expected.get(1)))
+            .andExpect(jsonPath("$.items[2].id").value(older));
+        var seen=new ArrayList<String>();
+        for(int page=0;page<3;page++) {
+            var response=mvc.perform(get(route).param("page",Integer.toString(page)).param("size","1")
+                .header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(page))
+                .andExpect(jsonPath("$.size").value(1)).andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+            seen.add(json.readTree(response.getResponse().getContentAsString()).get("items").get(0).get("id").asText());
+        }
+        assertThat(seen).containsExactlyElementsOf(expected).doesNotHaveDuplicates();
+        mvc.perform(get(route).param("page","3").param("size","1")
+            .header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.totalElements").value(3));
+        for(String query:List.of("?page=","?size=","?page=-1","?size=0","?size=101",
+                "?page=text","?page=2147483647&size=20"))
+            mvc.perform(get(route+query).header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isBadRequest());
     }
 
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
