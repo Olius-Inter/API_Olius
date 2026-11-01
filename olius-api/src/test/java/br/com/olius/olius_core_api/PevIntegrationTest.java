@@ -903,9 +903,7 @@ class PevIntegrationTest {
         var correction=paths.get("/api/v1/admin/deliveries/{id}/corrections").get("post");
         assertThat(correction.get("summary").asText()).contains("restaurar");
         assertThat(correction.get("responses").has("409")).isTrue();
-        for(String absent:List.of("/api/v1/pevs/me/resubmissions",
-                "/api/v1/users/me/deliveries"))
-            assertThat(paths.has(absent)).isFalse();
+        assertThat(paths.has("/api/v1/users/me/deliveries")).isFalse();
         var pevs=paths.get("/api/v1/pevs");
         assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
         assertThat(pevs.get("post").get("security").toString()).contains("bearer");

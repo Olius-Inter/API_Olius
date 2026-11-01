@@ -67,13 +67,7 @@ public class PevService {
     @Transactional
     public OwnPev updateAddress(UpdateAddress request, UUID actor, UserType type) {
         requireOwner(actor,type);
-        // O mesmo bloqueio usado pela decisão administrativa serializa estado e edição.
-        var ids=em.createNativeQuery("""
-            SELECT id FROM pev WHERE citizen_id=:actor OR establishment_id=:actor FOR UPDATE
-            """,UUID.class).setParameter("actor",actor).getResultList();
-        if(ids.isEmpty()) throw new ResourceNotFoundException();
-        Pev pev=em.find(Pev.class,ids.getFirst());
-        em.refresh(pev);
+        Pev pev=lockOwnPev(actor);
         if(pev.getStatus()!=PevStatus.PENDING && pev.getStatus()!=PevStatus.REJECTED)
             throw new BusinessRuleException(BusinessRuleException.Reason.STATE_CONFLICT);
 
@@ -93,6 +87,30 @@ public class PevService {
         if(changed!=1) throw new IllegalStateException("Endereço próprio do PEV indisponível");
         em.refresh(pev.getAddress());
         return own(pev);
+    }
+
+    @Transactional
+    public OwnPev resubmit(UUID actor, UserType type) {
+        requireOwner(actor,type);
+        Pev pev=lockOwnPev(actor);
+        if(pev.getStatus()!=PevStatus.REJECTED)
+            throw new BusinessRuleException(BusinessRuleException.Reason.STATE_CONFLICT);
+        audit.user(actor,"Reapresentação do PEV rejeitado pelo responsável");
+        em.createNativeQuery("UPDATE pev SET status='PENDING' WHERE id=:id")
+            .setParameter("id",pev.getId()).executeUpdate();
+        em.refresh(pev);
+        return own(pev);
+    }
+
+    private Pev lockOwnPev(UUID actor) {
+        // Compartilhado com a edição e compatível com o bloqueio da decisão administrativa.
+        var ids=em.createNativeQuery("""
+            SELECT id FROM pev WHERE citizen_id=:actor OR establishment_id=:actor FOR UPDATE
+            """,UUID.class).setParameter("actor",actor).getResultList();
+        if(ids.isEmpty()) throw new ResourceNotFoundException();
+        Pev pev=em.find(Pev.class,ids.getFirst());
+        em.refresh(pev);
+        return pev;
     }
 
     @Transactional(readOnly=true)

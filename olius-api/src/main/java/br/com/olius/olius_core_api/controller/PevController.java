@@ -35,6 +35,11 @@ public class PevController {
         return service.updateAddress(request,Caller.id(authentication),Caller.type(authentication));
     }
 
+    @PostMapping("/me/resubmissions")
+    public OwnPev resubmit(Authentication authentication) {
+        return service.resubmit(Caller.id(authentication),Caller.type(authentication));
+    }
+
     @GetMapping
     public PublicPage approved(@RequestParam(required=false) String page,
                                @RequestParam(required=false) String size) {
