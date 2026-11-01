@@ -170,7 +170,9 @@ de `Integer.MAX_VALUE` retornam `400`. Conta/sessão inválida retorna `401`.
 Sem entregas, retornar página vazia; página além do total preserva `totalElements`.
 Total e itens devem usar a mesma visão transacional (`REPEATABLE_READ`).
 Cada requisição tem sua própria visão; correções da data entre páginas podem
-deslocar itens, portanto o aplicativo deve deduplicar IDs ao acumular páginas.
+deslocar itens. Deduplicar IDs não recupera itens omitidos. Ao atualizar a lista,
+descartar páginas acumuladas e reiniciar em `page=0`; páginas anteriores à atualização
+não garantem completude.
 
 Implementação somente de leitura, usando tabelas e permissões existentes, sem
 migração. Testar isolamento entre cidadãos, distinção entre beneficiário e

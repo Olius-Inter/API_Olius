@@ -202,7 +202,10 @@ Paginação: padrões 0/20, máximo 100; ordem `deliveryDate DESC, id DESC`.
 Sem entregas ou além do total, a página é vazia e conserva `totalElements`.
 Parâmetros inválidos/vazios ou deslocamento acima de `Integer.MAX_VALUE` retornam
 `400`. Cada requisição possui sua própria visão; correções de data entre páginas
-podem deslocar itens. Deduplique por ID ao acumular páginas e permita atualizar a lista.
+podem deslocar itens. Deduplique por ID ao acumular páginas, mas não considere isso
+garantia de completude: a deduplicação não recupera itens omitidos por deslocamento.
+Ao atualizar, descarte as páginas acumuladas e reinicie em `page=0`.
+Páginas obtidas antes da atualização não garantem uma lista completa.
 O titular vem exclusivamente da sessão; não envie ID de cidadão para selecionar outro histórico.
 
 ## 7. Tratar erros

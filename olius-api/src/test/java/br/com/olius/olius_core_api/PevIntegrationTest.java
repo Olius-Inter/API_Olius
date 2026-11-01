@@ -460,6 +460,38 @@ class PevIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test void correctingPhysicalDateReordersOwnHistoryAndItsPages() throws Exception {
+        var owner=citizen();var beneficiary=citizen();
+        String access=login(owner.email()),citizenAccess=login(beneficiary.email());
+        UUID pev=approvedDeliveryPev(owner,access);
+        String qr=admin().queryForObject("SELECT qr_token FROM user_qr_code WHERE user_id=?",String.class,beneficiary.id());
+        var date=java.time.Instant.now().minusSeconds(7200).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String older=recordForTest(pev,access,qr,"1.00",date);
+        String newer=recordForTest(pev,access,qr,"2.00",date.plusSeconds(60));
+        String route="/api/v1/users/me/deliveries";
+        mvc.perform(get(route).header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(newer));
+        var actor=activeAdmin();var corrected=date.plusSeconds(120);
+        mvc.perform(post("/api/v1/admin/deliveries/"+older+"/corrections")
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON)
+            .content(correction(1,"RECORDED","1.00",corrected,"Data física conferida")))
+            .andExpect(status().isOk());
+        mvc.perform(get(route).header("Authorization","Bearer "+citizenAccess))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+            .andExpect(jsonPath("$.items[0].id").value(older))
+            .andExpect(jsonPath("$.items[0].deliveryDate").value(corrected.toString()))
+            .andExpect(jsonPath("$.items[1].id").value(newer));
+        var ids=new ArrayList<String>();
+        for(int page=0;page<2;page++) {
+            var response=mvc.perform(get(route).param("page",Integer.toString(page)).param("size","1")
+                .header("Authorization","Bearer "+citizenAccess))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+            ids.add(json.readTree(response.getResponse().getContentAsString()).get("items").get(0).get("id").asText());
+        }
+        assertThat(ids).containsExactly(older,newer).doesNotHaveDuplicates();
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
@@ -1101,6 +1133,16 @@ class PevIntegrationTest {
         assertThat(history.get("description").asText()).contains("deliveryDate DESC, id DESC","ANNULLED");
         assertThat(history.get("responses").has("200")).isTrue();
         assertThat(history.get("responses").has("403")).isTrue();
+        for(var parameter:history.get("parameters")) {
+            String name=parameter.get("name").asText();
+            if(name.equals("page") || name.equals("size")) {
+                var pagination=parameter.get("schema");
+                assertThat(pagination.get("type").asText()).isEqualTo("integer");
+                assertThat(pagination.get("default").asInt()).isEqualTo(name.equals("page") ? 0 : 20);
+                assertThat(pagination.get("minimum").asInt()).isEqualTo(name.equals("page") ? 0 : 1);
+                assertThat(pagination.get("maximum").asLong()).isEqualTo(name.equals("page") ? 2147483647L : 100L);
+            }
+        }
         var schemas=json.readTree(response.getResponse().getContentAsString()).get("components").get("schemas");
         assertThat(schemas.get("CitizenDeliveryHistoryPage").get("properties").has("items")).isTrue();
         var historyItem=schemas.get("CitizenDeliveryHistoryItem").get("properties");
