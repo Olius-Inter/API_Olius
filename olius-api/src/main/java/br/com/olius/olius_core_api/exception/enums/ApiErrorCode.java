@@ -3,6 +3,7 @@ package br.com.olius.olius_core_api.exception.enums;
 /** Códigos públicos estáveis. Não dependem de HTTP nem de mensagens do banco. */
 public enum ApiErrorCode {
     VALIDATION_ERROR,
+    PASSWORD_RESET_INVALID,
     MALFORMED_REQUEST,
     AUTHENTICATION_REQUIRED,
     ACCESS_DENIED,

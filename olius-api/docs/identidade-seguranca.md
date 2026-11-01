@@ -27,7 +27,7 @@ A sessão persistida no PostgreSQL permite encerrar o acesso antes do vencimento
 - Refresh token opaco de 32 bytes aleatórios, codificado em Base64 URL-safe sem padding. Somente seu hash SHA-256 é enviado às funções do banco.
 - Inatividade de sessão: 360 horas para cidadão/estabelecimento, 168 horas para administrador. Uma rotação válida renova a janela. Não há limite absoluto adicional aprovado.
 - Logout encerra a sessão atual; logout de todas encerra as sessões do titular. Inativação administrativa revoga as sessões; reativar a conta exige novo login. Reutilizar refresh consumido revoga aquela sessão, não todas as contas.
-- Alteração de senha/e-mail/perfil e recuperação de senha não fazem parte destes endpoints. Não foi introduzida uma política nova de revogação para essas alterações.
+- Recuperação de senha possui endpoints públicos próprios, descritos em [recuperacao-de-senha.md](recuperacao-de-senha.md), com revogação atômica de todas as sessões. Alteração direta de e-mail/perfil não é adicionada por esse fluxo.
 
 ## Organização da implementação
 
@@ -57,7 +57,7 @@ O tipo do cadastro é definido pela rota. Campos extras como userType, status, p
 
 Login valida senha com PasswordEncoder; conta inexistente também executa verificação de hash fictício para reduzir diferenças óbvias de tempo. Senha incorreta, conta inexistente ou inativa retornam o mesmo 401 público.
 
-Credenciais válidas → open_auth_session → commit da sessão → emissão de JWT e refresh. Cada requisição protegida valida assinatura RS256, emissor, audiência, tempo e vínculo sub/sid. SessionJwtConverter consulta o PostgreSQL e monta a autoridade atual. Uma conta ou sessão revogada deixa de funcionar mesmo que o JWT ainda não tenha vencido.
+Credenciais válidas → open_auth_session(uuid,bytea,text), com o hash exato validado → commit da sessão → emissão de JWT e refresh. Cada requisição protegida valida assinatura RS256, emissor, audiência, tempo e vínculo sub/sid. SessionJwtConverter consulta o PostgreSQL e monta a autoridade atual. Uma conta ou sessão revogada deixa de funcionar mesmo que o JWT ainda não tenha vencido.
 
 ### Renovação e reutilização
 

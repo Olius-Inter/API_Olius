@@ -901,3 +901,27 @@ CREATE TRIGGER trg_admin_invitation_audit AFTER INSERT OR UPDATE OR DELETE ON pu
 FOR EACH ROW EXECUTE FUNCTION public.fn_olius_audit_trigger();
 -- END ADMIN_MANAGEMENT
 COMMIT;
+
+BEGIN;
+CREATE OR REPLACE FUNCTION public.fn_olius_password_reset_guard() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+    IF TG_OP IN ('DELETE','TRUNCATE') THEN
+        RAISE EXCEPTION 'Histórico de recuperação não pode ser removido.' USING ERRCODE='55000';
+    END IF;
+    IF ROW(NEW.id,NEW.user_id,NEW.token_hash,NEW.issued_at,NEW.expires_at)
+       IS DISTINCT FROM ROW(OLD.id,OLD.user_id,OLD.token_hash,OLD.issued_at,OLD.expires_at)
+       OR ((OLD.consumed_at IS NOT NULL OR OLD.invalidated_at IS NOT NULL)
+           AND ROW(NEW.consumed_at,NEW.invalidated_at) IS DISTINCT FROM ROW(OLD.consumed_at,OLD.invalidated_at)) THEN
+        RAISE EXCEPTION 'Identidade e estados terminais de recuperação são imutáveis.' USING ERRCODE='55000';
+    END IF;
+    RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.fn_olius_password_reset_guard() FROM PUBLIC;
+CREATE TRIGGER trg_password_reset_guard BEFORE UPDATE OR DELETE ON public.password_reset_token
+    FOR EACH ROW EXECUTE FUNCTION public.fn_olius_password_reset_guard();
+CREATE TRIGGER trg_password_reset_no_truncate BEFORE TRUNCATE ON public.password_reset_token
+    FOR EACH STATEMENT EXECUTE FUNCTION public.fn_olius_password_reset_guard();
+CREATE TRIGGER trg_password_reset_audit AFTER INSERT OR UPDATE ON public.password_reset_token
+    FOR EACH ROW EXECUTE FUNCTION public.fn_olius_audit_trigger();
+COMMIT;

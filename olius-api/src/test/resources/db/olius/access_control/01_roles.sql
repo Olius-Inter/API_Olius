@@ -79,6 +79,8 @@ INSERT INTO olius_permission_scope VALUES
     ('admin_guard_state'),
     ('admin_invitation'),
     ('admin_invitation_log'),
+    ('password_reset_token'),
+    ('password_reset_token_log'),
     ('auth_session'),
     ('auth_refresh_token'),
     ('auth_session_log'),
@@ -374,9 +376,18 @@ REVOKE ALL ON auth_session, auth_refresh_token, auth_session_log FROM PUBLIC, ol
 GRANT USAGE ON SCHEMA public TO olius_api, olius_auth_owner;
 GRANT SELECT, INSERT, UPDATE ON auth_session, auth_refresh_token TO olius_auth_owner;
 GRANT INSERT ON auth_session_log TO olius_auth_owner;
-GRANT SELECT (id, user_type, status), UPDATE (id) ON users TO olius_auth_owner;
+GRANT SELECT (id, user_type, status, password_hash), UPDATE (id) ON users TO olius_auth_owner;
 -- UPDATE(id) permite SELECT FOR UPDATE. O papel é NOLOGIN, sem membership
 -- da API; as rotinas não alteram users.id. Não conceder esse owner à aplicação.
+
+-- A configuração de acesso nunca libera um overload legado sem a conferência.
+DO $login_contract$
+BEGIN
+    IF to_regprocedure('public.open_auth_session(uuid,bytea,text)') IS NULL
+       OR (SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname='open_auth_session')<>1 THEN
+        RAISE EXCEPTION 'Contrato de login incompatível: aplicar a migração de recuperação antes das permissões.';
+    END IF;
+END $login_contract$;
 
 -- PROPRIEDADE RESTRITA E EXECUÇÃO PELA API
 -- Apenas as funções revisadas ficam disponíveis à Core e ao grupo administrador.
@@ -384,9 +395,9 @@ GRANT SELECT (id, user_type, status), UPDATE (id) ON users TO olius_auth_owner;
 GRANT CREATE ON SCHEMA public TO olius_auth_owner;
 ALTER FUNCTION public.auth_idle_duration(public.user_type_t) OWNER TO olius_auth_owner;
 REVOKE ALL ON FUNCTION public.auth_idle_duration(public.user_type_t) FROM PUBLIC, olius_api;
-ALTER FUNCTION public.open_auth_session(UUID, BYTEA) OWNER TO olius_auth_owner;
-REVOKE ALL ON FUNCTION public.open_auth_session(UUID, BYTEA) FROM PUBLIC, olius_api;
-GRANT EXECUTE ON FUNCTION public.open_auth_session(UUID, BYTEA) TO olius_api, olius_owner;
+ALTER FUNCTION public.open_auth_session(UUID, BYTEA, TEXT) OWNER TO olius_auth_owner;
+REVOKE ALL ON FUNCTION public.open_auth_session(UUID, BYTEA, TEXT) FROM PUBLIC, olius_api;
+GRANT EXECUTE ON FUNCTION public.open_auth_session(UUID, BYTEA, TEXT) TO olius_api, olius_owner;
 ALTER FUNCTION public.rotate_auth_refresh_token(BYTEA, BYTEA) OWNER TO olius_auth_owner;
 REVOKE ALL ON FUNCTION public.rotate_auth_refresh_token(BYTEA, BYTEA) FROM PUBLIC, olius_api;
 GRANT EXECUTE ON FUNCTION public.rotate_auth_refresh_token(BYTEA, BYTEA) TO olius_api, olius_owner;
@@ -731,6 +742,41 @@ GRANT SELECT (id,city) ON public.addresses TO olius_ranking_reader;
 INSERT INTO public.data_catalog_role(role_name,description) VALUES
 ('olius_ranking_reader','Grupo NOLOGIN exclusivo da API Redis: SELECT em vw_annual_scores e em users(id,name,status), establishment(id,address_id), addresses(id,city); sem escrita ou execução de rotinas da aplicação.')
 ON CONFLICT (role_name) DO UPDATE SET description=EXCLUDED.description;
+
+-- PASSWORD_RESET — owner interno; nenhum segredo disponível à Core por tabela.
+REVOKE ALL ON public.password_reset_token, public.password_reset_token_log
+    FROM PUBLIC,olius_api,olius_reader,olius_ranking_reader,olius_catalog_editor;
+GRANT SELECT,INSERT ON public.password_reset_token TO olius_auth_owner;
+GRANT UPDATE (consumed_at,invalidated_at) ON public.password_reset_token TO olius_auth_owner;
+GRANT SELECT (email,password_hash),UPDATE (password_hash) ON public.users TO olius_auth_owner;
+GRANT INSERT ON public.password_reset_token_log TO olius_business_owner;
+GRANT SELECT ON public.password_reset_token_log TO olius_auditor;
+GRANT CREATE ON SCHEMA public TO olius_auth_owner;
+ALTER FUNCTION public.issue_password_reset(TEXT,BYTEA,INTERVAL) OWNER TO olius_auth_owner;
+ALTER FUNCTION public.complete_password_reset(BYTEA,TEXT) OWNER TO olius_auth_owner;
+REVOKE ALL ON FUNCTION public.issue_password_reset(TEXT,BYTEA,INTERVAL),public.complete_password_reset(BYTEA,TEXT)
+    FROM PUBLIC,olius_api,olius_owner RESTRICT;
+GRANT EXECUTE ON FUNCTION public.issue_password_reset(TEXT,BYTEA,INTERVAL),public.complete_password_reset(BYTEA,TEXT) TO olius_api;
+-- Falhar fechado em concessões externas, sem revogar direitos de terceiros silenciosamente.
+DO $password_reset_routines$
+DECLARE r RECORD;
+BEGIN
+    IF (SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace='public'::regnamespace
+        AND proname IN ('issue_password_reset','complete_password_reset'))<>2 THEN
+        RAISE EXCEPTION 'Sobrecarga de recuperação de senha não revisada.' USING ERRCODE='42501';
+    END IF;
+    FOR r IN SELECT p.proowner,p.proacl FROM pg_catalog.pg_proc p
+        WHERE p.pronamespace='public'::regnamespace
+          AND p.proname IN ('issue_password_reset','complete_password_reset') LOOP
+        IF EXISTS(SELECT 1 FROM pg_catalog.aclexplode(coalesce(r.proacl,pg_catalog.acldefault('f',r.proowner))) a
+            WHERE a.privilege_type='EXECUTE' AND a.grantee NOT IN (r.proowner,'olius_api'::regrole)) THEN
+            RAISE EXCEPTION 'Rotina de recuperação de senha tem EXECUTE externo: revisar antes de reaplicar.' USING ERRCODE='42501';
+        END IF;
+    END LOOP;
+END $password_reset_routines$;
+REVOKE CREATE ON SCHEMA public FROM olius_auth_owner;
+ALTER FUNCTION public.fn_olius_password_reset_guard() OWNER TO olius_owner;
+REVOKE ALL ON FUNCTION public.fn_olius_password_reset_guard() FROM PUBLIC,olius_api;
 
 COMMIT;
 

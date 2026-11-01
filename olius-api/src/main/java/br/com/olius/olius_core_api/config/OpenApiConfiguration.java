@@ -50,6 +50,7 @@ public class OpenApiConfiguration {
                 "/api/v1/collections", "/api/v1/admin/collections", "/api/v1/certificate",
                 "/api/v1/admin/certificates").stream().anyMatch(path::startsWith)
             || path.equals("/api/v1/establishments/me/score")
+            || path.startsWith("/api/v1/auth/password-reset")
             || path.endsWith("/certificate-progress") || path.endsWith("/environmental-summary");
     }
 
@@ -81,7 +82,8 @@ public class OpenApiConfiguration {
             || path.startsWith("/api/v1/auth/registrations/")
             || Set.of("/api/v1/auth/mobile/login", "/api/v1/auth/mobile/refresh",
                 "/api/v1/auth/web/csrf", "/api/v1/establishment-types",
-                "/api/v1/auth/admin-invitations/acceptance").contains(path);
+                "/api/v1/auth/admin-invitations/acceptance", "/api/v1/auth/password-reset-requests",
+                "/api/v1/auth/password-resets").contains(path);
     }
 
     private void documentSecurity(String path, PathItem.HttpMethod method, Operation operation) {
