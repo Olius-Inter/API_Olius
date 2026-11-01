@@ -146,6 +146,37 @@ Revisão antiga retorna `409 CONCURRENT_MODIFICATION`; anular novamente uma entr
 
 ## 5. Autorização e transações
 
+### Histórico próprio de entregas — contrato para implementação
+
+Task `86e3xqabw`. Implementar `GET /api/v1/users/me/deliveries`, capacidade já
+prevista acima. Esta seção define a representação inicial para integração; a rota
+continua pendente até os próximos commits e deve ser conciliada com o consumidor.
+
+Somente cidadão ativo consulta suas entregas como beneficiário. A identidade vem
+da sessão e filtra `delivery_pev.citizen_id`; não aceitar ID de cidadão fornecido
+pelo cliente. Estabelecimento e ADMIN recebem `403` nesta rota de titularidade.
+Responsável cidadão por PEV vê aqui suas entregas realizadas, não as recebidas no ponto.
+
+Resposta `200`: `items`, `page`, `size`, `totalElements`. Cada item contém `id`,
+`pevId`, `oilVolumeLiters`, `deliveryDate`, `createdAt`, `pointsEarned`,
+`recordStatus` e `revision` operacional. Incluir entregas `RECORDED` e `ANNULLED`,
+com dados vigentes após correção/restauração; não listar snapshots antigos nem
+expor QR, chave de reenvio, identidade do validador ou dados pessoais do responsável.
+Não incluir saldo: `/users/me/points` continua responsável pelo saldo e pelas
+movimentações de cálculo. O histórico não é uma trilha completa de auditoria.
+
+Paginação segue o padrão existente: `page=0`, `size=20`, máximo 100; ordem
+`deliveryDate DESC, id DESC`. Parâmetros vazios, inválidos ou deslocamento acima
+de `Integer.MAX_VALUE` retornam `400`. Conta/sessão inválida retorna `401`.
+Sem entregas, retornar página vazia; página além do total preserva `totalElements`.
+Total e itens devem usar a mesma visão transacional (`REPEATABLE_READ`).
+Cada requisição tem sua própria visão; correções da data entre páginas podem
+deslocar itens, portanto o aplicativo deve deduplicar IDs ao acumular páginas.
+
+Implementação somente de leitura, usando tabelas e permissões existentes, sem
+migração. Testar isolamento entre cidadãos, distinção entre beneficiário e
+validador, paginação/ordenação, estados e revisões vigentes, autenticação e perfis.
+
 ### Contrato da manutenção do próprio PEV — implementação nesta task
 
 Task `86e3xq9ec`. As rotas desta seção estão implementadas e documentadas no OpenAPI.
