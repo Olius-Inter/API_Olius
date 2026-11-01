@@ -7,6 +7,7 @@ import br.com.olius.olius_core_api.dto.PevResponses.PublicPage;
 import br.com.olius.olius_core_api.security.Caller;
 import br.com.olius.olius_core_api.service.PevService;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Operation;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -31,11 +32,13 @@ public class PevController {
     }
 
     @PatchMapping("/me/address")
+    @Operation(summary="Editar endereço do próprio PEV")
     public OwnPev updateAddress(@Valid @RequestBody UpdateAddress request,Authentication authentication) {
         return service.updateAddress(request,Caller.id(authentication),Caller.type(authentication));
     }
 
     @PostMapping("/me/resubmissions")
+    @Operation(summary="Reapresentar o próprio PEV rejeitado")
     public OwnPev resubmit(Authentication authentication) {
         return service.resubmit(Caller.id(authentication),Caller.type(authentication));
     }

@@ -328,6 +328,39 @@ class PevIntegrationTest {
         assertThat(admin().queryForObject("SELECT status::text FROM pev WHERE id=?",String.class,pev)).isEqualTo("REJECTED");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void ownerMaintainsRejectedPevAndAdministratorApprovesSamePoint(boolean company) throws Exception {
+        var account=company ? establishment() : citizen();String access=login(account.email());
+        var actor=activeAdmin();
+        var created=mvc.perform(post("/api/v1/pevs").header("Authorization","Bearer "+access)
+            .contentType(MediaType.APPLICATION_JSON).content(request())).andExpect(status().isCreated()).andReturn();
+        var original=json.readTree(created.getResponse().getContentAsString());
+        String id=original.get("id").asText(),addressId=original.get("address").get("id").asText();
+        deliveryPevIds.add(UUID.fromString(id));
+        String decision="/api/v1/admin/pevs/"+id+"/status";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(decision)
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"REJECTED\"}")).andExpect(status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/pevs/me/address")
+            .header("Authorization","Bearer "+access).contentType(MediaType.APPLICATION_JSON)
+            .content(request().replace("Rua do PEV","Rua corrigida")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REJECTED"));
+        mvc.perform(post("/api/v1/pevs/me/resubmissions").header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id))
+            .andExpect(jsonPath("$.status").value("PENDING"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(decision)
+            .header("Authorization","Bearer "+actor.access()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"APPROVED\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.address.street").value("Rua corrigida"));
+        mvc.perform(get("/api/v1/pevs/me").header("Authorization","Bearer "+access))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id))
+            .andExpect(jsonPath("$.status").value("APPROVED"))
+            .andExpect(jsonPath("$.createdAt").value(original.get("createdAt").asText()))
+            .andExpect(jsonPath("$.address.id").value(addressId))
+            .andExpect(jsonPath("$.address.street").value("Rua corrigida"));
+    }
+
     @Test void recordsAcceptedVolumeAndPointsWithoutChangingCitizenQr() throws Exception {
         var validator=citizen();
         var beneficiary=citizen();
@@ -963,6 +996,14 @@ class PevIntegrationTest {
         assertThat(correction.get("summary").asText()).contains("restaurar");
         assertThat(correction.get("responses").has("409")).isTrue();
         assertThat(paths.has("/api/v1/users/me/deliveries")).isFalse();
+        for(var entry:Map.of("/api/v1/pevs/me/address","patch",
+                "/api/v1/pevs/me/resubmissions","post").entrySet()) {
+            var operation=paths.get(entry.getKey()).get(entry.getValue());
+            assertThat(operation.get("security").toString()).contains("bearer");
+            assertThat(operation.get("description").asText()).contains("409 BUSINESS_STATE_CONFLICT");
+            assertThat(operation.get("responses").has("200")).isTrue();
+            assertThat(operation.get("responses").has("409")).isTrue();
+        }
         var pevs=paths.get("/api/v1/pevs");
         assertThat(pevs.get("get").get("security").isEmpty()).isTrue();
         assertThat(pevs.get("post").get("security").toString()).contains("bearer");
