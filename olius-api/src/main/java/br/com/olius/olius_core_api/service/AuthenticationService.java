@@ -37,7 +37,10 @@ public class AuthenticationService {
         if(!matches || user.isEmpty() || user.get().getStatus()!=UserStatus.ACTIVE)
             throw new BadCredentialsException("Credenciais inválidas");
         String refresh=secrets.generate();
-        Outcome outcome=sessions.open(user.get().getId(),secrets.hash(refresh),validatedHash);
+        Outcome outcome=passwords.upgradeEncoding(validatedHash)
+            ? sessions.openWithCredentialUpgrade(user.get().getId(),secrets.hash(refresh),validatedHash,
+                passwords.encode(request.password()))
+            : sessions.open(user.get().getId(),secrets.hash(refresh),validatedHash);
         return issue(outcome,refresh);
     }
     public Tokens refresh(String current) {
