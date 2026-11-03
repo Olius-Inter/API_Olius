@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core
+  namespace: olius
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: core
+  template:
+    metadata:
+      labels:
+        app: core
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: core
+          # Substituída pela referência ECR em kustomization.yaml.
+          image: olius-core:v1
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: core-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: olius-secrets
+                  key: CORE_DB_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: jwt
+              mountPath: /etc/olius/jwt
+              readOnly: true
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: jwt
+          secret:
+            secretName: core-jwt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core
+  namespace: olius
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "120"
+spec:
+  type: LoadBalancer
+  selector:
+    app: core
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
