@@ -8,7 +8,10 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-/** Retorna códigos; não lança rejeição de login dentro da transação de revogação. */
+/**
+ * Mantém as fronteiras de commit da autenticação. Revogações defensivas retornam códigos para
+ * confirmar seus efeitos; falhas do rehash lançam exceção para desfazer credencial e sessão juntas.
+ */
 @Service
 public class SessionTransactions {
     private final AuthSessionRepository sessions;
@@ -18,6 +21,10 @@ public class SessionTransactions {
         CredentialUpgradeRepository credentials, AuditContext audit) {
         this.sessions=sessions; this.credentials=credentials; this.audit=audit;
     }
+    /**
+     * Substitui apenas a credencial validada de conta ativa e abre a sessão no mesmo commit.
+     * Disputa perdida ou recusa da função SQL desfaz toda a atualização, sem reler outra credencial.
+     */
     @Transactional(propagation=Propagation.REQUIRES_NEW,
         isolation=Isolation.READ_COMMITTED)
     public Outcome openWithCredentialUpgrade(UUID userId, byte[] tokenHash, String validatedHash, String replacement) {

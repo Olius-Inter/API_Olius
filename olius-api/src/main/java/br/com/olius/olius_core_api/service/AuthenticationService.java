@@ -30,6 +30,10 @@ public class AuthenticationService {
         this.users=users; this.passwords=passwords; this.sessions=sessions; this.secrets=secrets;
         this.encoder=encoder; this.properties=properties; dummyHash=passwords.encode(secrets.generate());
     }
+    /**
+     * Verifica a senha antes de gerar o substituto e envia ao banco o hash efetivamente validado.
+     * No formato legado, delega atualização e abertura da sessão à mesma transação; só emite JWT após commit.
+     */
     public Tokens login(Login request) {
         var user=users.findByEmail(EmailAddress.normalize(request.email()));
         String validatedHash=user.map(u -> u.getPasswordHash()).orElse(dummyHash);
