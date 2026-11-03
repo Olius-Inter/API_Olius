@@ -66,4 +66,20 @@ class LegacyCompatiblePasswordEncoderTest {
         String current=encoder.encode("test");
         assertThat(encoder.matches("test",current.replace("$v=19$","$v=16$"))).isFalse();
     }
+    /** Garante que falha no parsing nunca seja confundida com hash válido que exige migração. */
+    @Test void invalidBase64NeverAuthenticatesOrRequestsAnUpgrade() {
+        String prefix="pbkdf2$120000$AAECAwQFBgcICQoLDA0ODw==$";
+        String nonCanonicalHash=prefix+"A".repeat(42)+"B=";
+        String invalidAlphabet=prefix+"!".repeat(43)+"=";
+        for (String invalid : new String[]{nonCanonicalHash,invalidAlphabet}) {
+            assertThat(encoder.matches("test",invalid)).isFalse();
+            assertThat(encoder.upgradeEncoding(invalid)).isFalse();
+        }
+        String currentPrefix="$argon2id$v=19$m=19456,t=2,p=1$";
+        String currentSalt="AAECAwQFBgcICQoLDA0ODw$";
+        String invalidCurrent=currentPrefix+currentSalt+"A".repeat(42)+"B";
+        assertThat(encoder.matches("test",invalidCurrent)).isFalse();
+        assertThat(encoder.upgradeEncoding(invalidCurrent)).isFalse();
+    }
+
 }

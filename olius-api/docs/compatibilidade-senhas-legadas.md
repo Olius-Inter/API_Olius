@@ -118,3 +118,16 @@ Caminhos Java relativos a src/main/java/br/com/olius/olius_core_api ou src/test/
 A primeira execução dirigida passou com 32 testes. Após acrescentar os cenários de falha real de constraint e retorno inválido real da função, a suíte completa `mvnw -o verify` terminou com **BUILD SUCCESS: 632 testes, zero falhas, zero erros e zero ignorados**, incluindo 18 casos do encoder e 15 de integração da nova feature. JAR e relatório JaCoCo gerados. PostgreSQL descartável 16.15 com conexão da Core sem superusuário, Java 21; nenhuma conexão com bancos reais nesta homologação. A execução durou 9min31s. Os avisos de conexões de contextos de teste cujos containers já encerraram não resultaram em falhas; não foi alterada a infraestrutura existente para silenciá-los.
 
 CI/Sonar remotos, publicação da Core, carga ETL e homologação com dados migrados ainda não estão comprovados por essa execução local.
+
+## Revisão da PR #31 — 03/11/2026
+
+- Corrigida a dupla codificação dos comentários e da mensagem de erro do encoder, mantendo UTF-8.
+- Diferenciados os nomes do padrão Argon2id e do encoder delegado.
+- Parser passa a retornar `Optional` e usa um tipo interno para salt/hash; ausência de resultado continua recusando autenticação e migração. Nenhuma alteração nos algoritmos, parâmetros ou contratos SQL.
+- Argumentos dos testes de exceção são preparados fora das lambdas, isolando a chamada verificada.
+- Acrescentado Javadoc às validações, fronteira transacional e auxiliares de teste relevantes.
+- Incluída regressão para Base64 inválido/não canônico, garantindo que não autentique nem indique necessidade de atualização do hash.
+
+Validação após os ajustes: `mvnw -o -Dtest=LegacyCompatiblePasswordEncoderTest,LegacyPasswordIntegrationTest,AuthenticationCredentialRaceTest,IdentitySecurityIntegrationTest,PasswordResetIntegrationTest,AdminInvitationsIntegrationTest,CryptographyConfigurationTest,AuthAuditContextIntegrationTest verify` terminou com **BUILD SUCCESS: 94 testes, zero falhas, erros ou ignorados**. Inclui 19 casos do encoder e 15 da integração legada, além das regressões de identidade, recuperação, convites, auditoria e chaves. JAR e relatório JaCoCo gerados. Esta execução foi dirigida aos componentes afetados; a execução completa de 632 testes registrada acima corresponde à implementação anterior à revisão.
+
+Os comentários de documentação adicionados durante a execução não mudaram o comportamento compilado dos testes. Nova aprovação do CI/Sonar/CodeRabbit depende da publicação dos ajustes; não foi simulada como concluída localmente.

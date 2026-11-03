@@ -7,6 +7,7 @@ import javax.crypto.spec.PBEKeySpec;
 /** Algoritmo original SenhaUtil, somente credenciais fictícias de teste. */
 public final class LegacyPasswords {
     private LegacyPasswords() { }
+    /** Reproduz o PBKDF2 original com salt fictício fixo para testes reproduzíveis, nunca para produção. */
     public static String hash(String password) {
         byte[] salt = new byte[16];
         for (int i=0;i<salt.length;i++) salt[i]=(byte)i;

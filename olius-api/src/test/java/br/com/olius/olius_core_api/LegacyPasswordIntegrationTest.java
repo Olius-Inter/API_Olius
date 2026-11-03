@@ -84,6 +84,7 @@ class LegacyPasswordIntegrationTest {
             """,Integer.class)).isZero();
     }
 
+    /** Confere a mesma resposta pública para usuário desconhecido, senha errada e hash inválido. */
     @Test void wrongPasswordUnknownAndMalformedHaveSamePublicErrorWithoutChanges() throws Exception {
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         Account malformed=account("CITIZENS","pbkdf2$999999999$x$y");
@@ -100,7 +101,8 @@ class LegacyPasswordIntegrationTest {
     @Test void inactiveLegacyAccountIsNotUpgraded() {
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         owner().update("UPDATE users SET status='INACTIVE' WHERE id=?",account.id());
-        assertThatThrownBy(() -> authentication.login(new Login(account.email(),PASSWORD)))
+        var request=new Login(account.email(),PASSWORD);
+        assertThatThrownBy(() -> authentication.login(request))
             .isInstanceOf(BadCredentialsException.class);
         assertThat(stored(account)).isEqualTo(account.hash()); assertThat(countSessions(account)).isZero();
     }
@@ -116,7 +118,8 @@ class LegacyPasswordIntegrationTest {
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         doThrow(new DataAccessResourceFailureException("fixture"))
             .when(sessionRepository).open(eq(account.id()),any(byte[].class),anyString());
-        assertThatThrownBy(() -> authentication.login(new Login(account.email(),PASSWORD)))
+        var request=new Login(account.email(),PASSWORD);
+        assertThatThrownBy(() -> authentication.login(request))
             .isInstanceOf(DataAccessResourceFailureException.class);
         unchanged(account);
     }
@@ -125,7 +128,8 @@ class LegacyPasswordIntegrationTest {
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         doReturn(new AuthSessionRepository.Outcome("CREDENTIAL_CHANGED",null,account.id(),null))
             .when(sessionRepository).open(eq(account.id()),any(byte[].class),anyString());
-        assertThatThrownBy(() -> authentication.login(new Login(account.email(),PASSWORD)))
+        var request=new Login(account.email(),PASSWORD);
+        assertThatThrownBy(() -> authentication.login(request))
             .isInstanceOf(BadCredentialsException.class);
         unchanged(account);
     }
@@ -136,7 +140,9 @@ class LegacyPasswordIntegrationTest {
         sessions.open(existing.id(),duplicated,existing.hash());
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         String replacement=passwords.encode(PASSWORD);
-        assertThatThrownBy(() -> sessions.openWithCredentialUpgrade(account.id(),duplicated,account.hash(),replacement))
+        UUID userId=account.id();
+        String validatedHash=account.hash();
+        assertThatThrownBy(() -> sessions.openWithCredentialUpgrade(userId,duplicated,validatedHash,replacement))
             .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         unchanged(account);
     }
@@ -144,7 +150,10 @@ class LegacyPasswordIntegrationTest {
     @Test void realSessionInvalidInputRollsBackUpgrade() {
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         String replacement=passwords.encode(PASSWORD);
-        assertThatThrownBy(() -> sessions.openWithCredentialUpgrade(account.id(),new byte[1],account.hash(),replacement))
+        UUID userId=account.id();
+        String validatedHash=account.hash();
+        byte[] invalidTokenHash=new byte[1];
+        assertThatThrownBy(() -> sessions.openWithCredentialUpgrade(userId,invalidTokenHash,validatedHash,replacement))
             .isInstanceOf(BadCredentialsException.class);
         unchanged(account);
     }
@@ -153,7 +162,8 @@ class LegacyPasswordIntegrationTest {
         Account account=account("CITIZENS",LegacyPasswords.hash(PASSWORD));
         doThrow(new DataAccessResourceFailureException("fixture"))
             .when(credentials).replace(eq(account.id()),anyString(),anyString());
-        assertThatThrownBy(() -> authentication.login(new Login(account.email(),PASSWORD)))
+        var request=new Login(account.email(),PASSWORD);
+        assertThatThrownBy(() -> authentication.login(request))
             .isInstanceOf(DataAccessResourceFailureException.class);
         unchanged(account);
         verify(sessionRepository,never()).open(eq(account.id()),any(byte[].class),anyString());
@@ -213,6 +223,7 @@ class LegacyPasswordIntegrationTest {
         assertThat(login.access()).isNotNull();
     }
 
+    /** Aguarda evidência real de bloqueio no PostgreSQL antes de confirmar a operação concorrente. */
     private void assertBlockedUpgradeFailsAfterCommit(Connection blocker, Account account) throws Exception {
         int pid;
         try (var statement=blocker.createStatement(); var result=statement.executeQuery("SELECT pg_backend_pid()")) {
@@ -229,11 +240,13 @@ class LegacyPasswordIntegrationTest {
             } finally { blocker.rollback(); }
         }
     }
+    /** Converte somente a rejeição esperada da disputa em false; erros de infraestrutura continuam falhando. */
     private boolean attemptUpgrade(Account account,String replacement) {
         try { sessions.openWithCredentialUpgrade(account.id(),secrets.hash(secrets.generate()),account.hash(),replacement); return true; }
         catch (BadCredentialsException exception) { return false; }
     }
     private void unchanged(Account account) { unchanged(account,true); }
+    /** Verifica que falhas não deixam credencial, sessão ou auditoria de atualização parcialmente confirmadas. */
     private void unchanged(Account account,boolean noUpdates) {
         assertThat(stored(account)).isEqualTo(account.hash()); assertThat(countSessions(account)).isZero();
         if (noUpdates) assertThat(owner().queryForObject("SELECT count(*) FROM users_log WHERE id=? AND operation='UPDATE'",Integer.class,account.id())).isZero();
