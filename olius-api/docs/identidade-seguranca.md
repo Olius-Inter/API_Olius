@@ -544,3 +544,23 @@ Validação da integração de 28/10/2026: suíte completa com 368 testes aprova
 PostgreSQL 18.6. As três classes de fixtures ajustadas passaram em 16.15 (28 testes).
 Regressões SQL e concorrência oficiais passaram nas duas versões. Detalhes,
 ressalvas e procedimento de reprodução: docs/compatibilidade-postgresql.md.
+
+## Swagger atrás do API Gateway — mesma origem
+
+A documentação anuncia `servers: [{url: "/"}]` explicitamente. O Swagger resolve esse endereço na origem do documento OpenAPI: aberto por HTTPS no API Gateway, envia as requisições pelo mesmo HTTPS público. A conexão HTTP entre gateway/Load Balancer e Core não deve ser anunciada como destino do navegador. Localmente, continua usando a origem local pela qual a documentação foi acessada.
+
+Isso atende à publicação atual, sem prefixo externo de estágio. Se futuramente o proxy publicar a API sob um prefixo adicional, revisar a base anunciada e os caminhos da documentação/cookies para esse prefixo.
+
+Após publicar a nova imagem e concluir o rollout, recarregar o Swagger sem cache e verificar `/v3/api-docs`: o único servidor deve ter `url: "/"`. Gerar um novo CSRF por `GET /api/v1/auth/web/csrf`, usar o `token` retornado no campo `csrf` de Authorize e efetuar o login web na mesma origem e navegador. O cookie HttpOnly é enviado automaticamente; não copiar seu conteúdo para outro host. Confirmar em Request URL que a requisição usa o endereço HTTPS público.
+
+CSRF, cookies Secure, autenticação e autorização permanecem exigidos. A correção resolve a escolha de URL do Swagger, não valida credenciais nem altera políticas CORS. Se a próxima resposta for 401/403, tratar esse resultado separadamente. A homologação na AWS depende da publicação; o teste local verifica a URL relativa no JSON OpenAPI.
+
+Na verificação pública de 04/11/2026, o GET da documentação e do CSRF pelo gateway responderam 200, mas OPTIONS de login com a origem HTTPS do próprio gateway retornou `403 Invalid CORS request`. O backend pode enxergar o Host HTTP interno do proxy e considerar essa origem externa: autorizar explicitamente a origem pública em `OLIUS_ALLOWED_ORIGINS`, preservando outras origens válidas já configuradas. Para a publicação atual:
+
+```dotenv
+OLIUS_ALLOWED_ORIGINS=https://tvkgo0evuj.execute-api.us-east-1.amazonaws.com
+```
+
+Configurar no ambiente que inicia o processo Java hospedado, não apenas no `.env` local. Se a variável vier do ConfigMap, aplicar a atualização e reiniciar o Deployment para carregá-la. Repetir a verificação após o rollout; não liberar `*` nem desabilitar CSRF para contornar a configuração. O hostname acima é específico da publicação atual e deve acompanhar mudanças do gateway.
+
+Validação local em 04/11/2026: `mvnw -o -Dtest=IdentitySecurityIntegrationTest verify` concluiu com BUILD SUCCESS, 18 testes, nenhuma falha, erro ou teste ignorado, JAR e JaCoCo gerados. O contrato de documentação verifica um único servidor com URL `/`; a publicação e a homologação do login no API Gateway continuam pendentes.
