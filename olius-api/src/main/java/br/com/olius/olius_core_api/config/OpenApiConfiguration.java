@@ -6,6 +6,7 @@ import io.swagger.v3.oas.models.media.*;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.security.*;
+import io.swagger.v3.oas.models.servers.Server;
 import java.util.*;
 import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.*;
@@ -21,6 +22,8 @@ public class OpenApiConfiguration {
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
             .description("Cadastro, identidade, PEV, entregas e pontos B2C, pagamentos, solicitações, agenda, coletas B2B, certificados e consultas ambientais. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            // Resolve na origem pública da documentação, mesmo quando o proxy chama a Core por HTTP.
+            .servers(List.of(new Server().url("/").description("Mesma origem da documentação")))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
