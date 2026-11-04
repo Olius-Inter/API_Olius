@@ -557,9 +557,13 @@ CSRF, cookies Secure, autenticação e autorização permanecem exigidos. A corr
 
 Na verificação pública de 04/11/2026, o GET da documentação e do CSRF pelo gateway responderam 200, mas OPTIONS de login com a origem HTTPS do próprio gateway retornou `403 Invalid CORS request`. O backend pode enxergar o Host HTTP interno do proxy e considerar essa origem externa: autorizar explicitamente a origem pública em `OLIUS_ALLOWED_ORIGINS`, preservando outras origens válidas já configuradas. Para a publicação atual:
 
+O valor da variável substitui a lista inteira; ele não acrescenta origens automaticamente. O modelo abaixo representa a lista completa após incluir o gateway:
+
 ```dotenv
-OLIUS_ALLOWED_ORIGINS=https://tvkgo0evuj.execute-api.us-east-1.amazonaws.com
+OLIUS_ALLOWED_ORIGINS=<origens-atuais>,https://tvkgo0evuj.execute-api.us-east-1.amazonaws.com
 ```
+
+Substituir `<origens-atuais>` pela lista real já configurada, separada por vírgulas; não copiar o marcador literalmente. Manter todas as origens autorizadas do Web e acrescentar o gateway somente se ainda não constar. Se a lista atual estiver vazia, usar somente a URL do gateway, sem o marcador nem a vírgula inicial.
 
 Configurar no ambiente que inicia o processo Java hospedado, não apenas no `.env` local. Se a variável vier do ConfigMap, aplicar a atualização e reiniciar o Deployment para carregá-la. Repetir a verificação após o rollout; não liberar `*` nem desabilitar CSRF para contornar a configuração. O hostname acima é específico da publicação atual e deve acompanhar mudanças do gateway.
 
