@@ -40,7 +40,61 @@ class IdentitySecurityIntegrationTest {
     @Autowired JwtEncoder encoder;
     @Autowired JwtDecoder decoder;
     @Autowired SecurityProperties properties;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    br.com.olius.olius_core_api.integration.ia.IaClient ia;
     private static final String PASSWORD="Password1!";
+
+    @Test void chatRequiresLiveBearerAndForwardsItToIa() throws Exception {
+        org.mockito.Mockito.reset(ia);
+        UUID conversation = UUID.randomUUID();
+        String body = json.writeValueAsString(Map.of("session_id", conversation, "pergunta", "Olá"));
+        mvc.perform(post("/api/v1/chat").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/chat/sessions/" + conversation + "/iniciar"))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/chat/sessions/" + conversation + "/encerrar"))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/chat").header("Authorization", "Bearer invalid-token")
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized());
+        org.mockito.Mockito.verifyNoInteractions(ia);
+
+        var account = citizen();
+        String access = login(account.email()).access();
+        org.mockito.Mockito.when(ia.chat(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(access)))
+            .thenReturn(new br.com.olius.olius_core_api.dto.ChatContracts.ChatResponse("Olá"));
+        org.mockito.Mockito.when(ia.session(org.mockito.ArgumentMatchers.eq(conversation),
+            org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.eq(access)))
+            .thenReturn(new br.com.olius.olius_core_api.dto.ChatContracts.SessionResponse(conversation, null));
+        mvc.perform(post("/api/v1/chat").header("Authorization", "Bearer " + access)
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.resposta").value("Olá"));
+        for (String action : List.of("iniciar", "encerrar")) {
+            mvc.perform(post("/api/v1/chat/sessions/" + conversation + "/" + action)
+                .header("Authorization", "Bearer " + access)).andExpect(status().isOk());
+        }
+        org.mockito.Mockito.verify(ia).chat(
+            new br.com.olius.olius_core_api.dto.ChatContracts.ChatRequest(conversation, "Olá"), access);
+        org.mockito.Mockito.verify(ia).session(conversation, true, access);
+        org.mockito.Mockito.verify(ia).session(conversation, false, access);
+        mvc.perform(post("/api/v1/auth/mobile/logout").header("Authorization", "Bearer " + access))
+            .andExpect(status().isNoContent());
+        org.mockito.Mockito.clearInvocations(ia);
+        mvc.perform(post("/api/v1/chat").header("Authorization", "Bearer " + access)
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized());
+        org.mockito.Mockito.verifyNoInteractions(ia);
+    }
+
+    @Test void chatOpenApiDocumentsBearerAndGatewayErrors() throws Exception {
+        var result = mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
+        var paths = json.readTree(result.getResponse().getContentAsString()).path("paths");
+        for (String path : List.of("/api/v1/chat", "/api/v1/chat/sessions/{sessionId}/iniciar",
+                "/api/v1/chat/sessions/{sessionId}/encerrar")) {
+            var operation = paths.path(path).path("post");
+            assertThat(operation.path("security").toString()).contains("bearer");
+            assertThat(operation.path("responses").has("502")).isTrue();
+            assertThat(operation.path("responses").has("504")).isTrue();
+        }
+    }
 
     @Test void citizenRegistrationLoginAndOwnerProfile() throws Exception {
         var account=citizen();
