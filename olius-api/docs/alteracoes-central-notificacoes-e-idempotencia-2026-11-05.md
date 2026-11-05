@@ -6,7 +6,7 @@ Data do registro: 05/11/2026.
 
 Implementação local no PostgreSQL e na Core API para os seis eventos aprovados: PEV aprovado, rejeitado, inativado e reativado, além de coleta B2B agendada e reagendada. Também foi adicionada proteção contra o reenvio atrasado de uma ação de agendamento.
 
-Foram criados ou alterados 19 arquivos. As alterações estão na cópia local da API e na cópia do banco em `artifacts/revisao-api-banco-2026-11-01/DB_Segundo`. A aplicação das migrações em um banco em execução e a execução dos testes integrados estão pendentes.
+Foram criados ou alterados 20 arquivos. As alterações estão na cópia local da API e na cópia do banco em `artifacts/revisao-api-banco-2026-11-01/DB_Segundo`. A aplicação das migrações em um banco em execução e a execução dos testes integrados estão pendentes.
 
 ## Banco de dados — 7 arquivos
 
@@ -42,7 +42,7 @@ O comando é registrado inclusive quando o horário enviado já é o atual e nen
 
 Exemplo esperado: agendar para 10h com a chave A, reagendar para 14h com a chave B e reenviar a ação A preserva 14h e a quantidade de avisos. Uma nova ação para voltar às 10h deve usar uma nova chave.
 
-## Core API — 6 arquivos
+## Core API — 7 arquivos
 
 Os caminhos Java partem de `API_Olius/olius-api/src`. O pacote principal é `br/com/olius/olius_core_api`.
 
@@ -52,7 +52,8 @@ Os caminhos Java partem de `API_Olius/olius-api/src`. O pacote principal é `br/
 | `main/java/br/com/olius/olius_core_api/controller/CollectionRequestAdministrationController.java` | Recebimento do cabeçalho opcional `Idempotency-Key` e atualização da descrição OpenAPI. | Permitir que o cliente identifique uma ação de agendamento e reutilize sua chave nos reenvios. |
 | `main/java/br/com/olius/olius_core_api/service/CollectionRequestService.java` | Inclusão de uma chamada com chave e encaminhamento dentro da transação. | Integrar a idempotência ao fluxo normal da Core, preservando a chamada existente sem chave. |
 | `main/java/br/com/olius/olius_core_api/repository/CollectionRequestRepository.java` | Escolha do procedimento SQL conforme a presença da chave. | Encaminhar os dados ao procedimento com idempotência quando o cabeçalho estiver presente. |
-| `test/java/br/com/olius/olius_core_api/PevAdministrationIntegrationTest.java` | Adição de teste de aviso de aprovação, titularidade e primeira leitura. | Verificar que uma conta acessa seus avisos e que a repetição da leitura preserva o primeiro horário. |
+| `test/java/br/com/olius/olius_core_api/NotificationIntegrationTest.java` — novo | Teste de aviso de aprovação, titularidade e primeira leitura, em classe com PostgreSQL próprio. | Verificar a central e isolar seus dados dos testes de listagem de PEV. |
+| `test/java/br/com/olius/olius_core_api/OliusApiApplicationTests.java` | Atualização da contagem esperada de tabelas do schema. | Conferir 64 tabelas na central e 65 após adicionar a tabela de comandos de agendamento. |
 | `test/java/br/com/olius/olius_core_api/CollectionRequestsIntegrationTest.java` | Adição de teste de reenvio atrasado e conflito de chave. | Cobrir o cenário que motivou a mudança e conferir a quantidade de registros de histórico e avisos. |
 
 ### Rotas adicionadas
@@ -95,3 +96,7 @@ A compilação Java isolada passou para os arquivos alterados e para os testes a
 A compilação isolada não comprova o funcionamento integrado. A tentativa de executar o Maven em modo offline encontrou dependências ausentes no cache, e o Docker estava indisponível para subir o PostgreSQL dos testes.
 
 Antes da implantação, é necessário executar os testes integrados, validar as duas migrações em uma base existente e verificar as permissões com a role utilizada pela Core. A homologação deve cobrir reenvio atrasado, conflito de chave, rollback, concorrência, isolamento entre contas e leitura repetida.
+
+## Correção dos testes após a primeira execução do CI
+
+A primeira execução encontrou duas falhas antes da etapa Sonar. A contagem fixa do schema esperava 63 tabelas e o teste de notificações inserido em PevAdministrationIntegrationTest interferia na ordenação de outro teste. A correção atualiza a contagem e move o teste de notificações para NotificationIntegrationTest, com container próprio. A compilação isolada dos três testes passou. O resultado da nova execução integrada deve ser consultado nos checks da PR #35.
