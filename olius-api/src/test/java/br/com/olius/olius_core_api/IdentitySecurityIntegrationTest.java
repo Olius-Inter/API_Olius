@@ -332,6 +332,8 @@ class IdentitySecurityIntegrationTest {
 
     @Test void openApiDocumentsSecurityAndRequests() throws Exception {
         mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.servers.length()").value(1))
+            .andExpect(jsonPath("$.servers[0].url").value("/"))
             .andExpect(jsonPath("$.components.securitySchemes.bearer.scheme").value("bearer"))
             .andExpect(jsonPath("$.paths['/api/v1/auth/mobile/login'].post.requestBody").exists());
     }

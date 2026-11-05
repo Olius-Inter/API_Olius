@@ -83,19 +83,24 @@ Ser responsável por PEV não concede acesso às operações de coleta B2B.
 
 ### Corrigir e reapresentar o próprio ponto
 
-Em `PENDING` ou `REJECTED`, envie `PATCH /api/v1/pevs/me/address` com o mesmo
+Em qualquer estado do próprio PEV, envie `PATCH /api/v1/pevs/me/address` com o mesmo
 formato `{"address":{...}}` da solicitação. Envie o endereço completo: campos
 obrigatórios não podem faltar; complemento e coordenadas omitidos ficam nulos.
-Sucesso retorna `200` com o mesmo PEV e endereço atualizados, sem mudar o estado.
-O endereço pessoal/comercial do responsável é preservado.
+Sucesso retorna `200` preservando os IDs do PEV e endereço. Uma mudança efetiva em
+`APPROVED` retorna o ponto a `PENDING`: ele sai do mapa e novas entregas aguardam
+aprovação administrativa. Nos demais estados, o estado é preservado; editar um
+`INACTIVE` não o reativa. Reenviar endereço equivalente não muda o estado.
+O endereço comercial do estabelecimento, quando existir, permanece independente.
+Coordenadas devem ser informadas em par ou ambas nulas, com até seis casas
+decimais significativas. A Core não gera coordenadas automaticamente.
 
 Depois de corrigir um ponto rejeitado, envie `POST /api/v1/pevs/me/resubmissions`
 sem corpo. Retorna `200` com o mesmo PEV em `PENDING`. A edição não reapresenta
 automaticamente; as ações são independentes. Reapresentar sem editar também é permitido.
 Somente o próprio responsável ativo, cidadão ou estabelecimento, executa essas ações.
 
-Ausência de PEV retorna `404`. Editar `APPROVED`/`INACTIVE` ou reapresentar qualquer
-estado diferente de `REJECTED` retorna `409 BUSINESS_STATE_CONFLICT`.
+Ausência de PEV retorna `404`. Reapresentar qualquer estado diferente de
+`REJECTED` retorna `409 BUSINESS_STATE_CONFLICT`.
 Após conflito ou perda da resposta, consulte `/pevs/me` antes de decidir nova ação.
 Não crie outra solicitação para substituir um ponto rejeitado.
 
@@ -225,3 +230,10 @@ erros de validação podem incluir `errors`. Trate pelo status/código, não pel
 | `500` / `503` | Informar falha temporária; preservar os dados e a chave de entrega para recuperação. |
 
 Ranking pertence à integração com a API Redis; a Core não publica cada entrega por HTTP.
+
+## Evolução cadastral — 05/11/2026
+
+O mapa público não recebe complemento do endereço nem nome de cidadão; o campo
+`name` traz o nome cadastral quando o responsável é estabelecimento e `null`
+quando é cidadão. Edição do perfil próprio e endereço comercial estão detalhadas
+em [Perfil e endereços](perfil-enderecos.md). Troca de e-mail permanece separada.

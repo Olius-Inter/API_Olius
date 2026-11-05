@@ -30,6 +30,10 @@ public class AuthenticationService {
         this.users=users; this.passwords=passwords; this.sessions=sessions; this.secrets=secrets;
         this.encoder=encoder; this.properties=properties; dummyHash=passwords.encode(secrets.generate());
     }
+    /**
+     * Verifica a senha antes de gerar o substituto e envia ao banco o hash efetivamente validado.
+     * No formato legado, delega atualização e abertura da sessão à mesma transação; só emite JWT após commit.
+     */
     public Tokens login(Login request) {
         var user=users.findByEmail(EmailAddress.normalize(request.email()));
         String validatedHash=user.map(u -> u.getPasswordHash()).orElse(dummyHash);
@@ -37,7 +41,10 @@ public class AuthenticationService {
         if(!matches || user.isEmpty() || user.get().getStatus()!=UserStatus.ACTIVE)
             throw new BadCredentialsException("Credenciais inválidas");
         String refresh=secrets.generate();
-        Outcome outcome=sessions.open(user.get().getId(),secrets.hash(refresh),validatedHash);
+        Outcome outcome=passwords.upgradeEncoding(validatedHash)
+            ? sessions.openWithCredentialUpgrade(user.get().getId(),secrets.hash(refresh),validatedHash,
+                passwords.encode(request.password()))
+            : sessions.open(user.get().getId(),secrets.hash(refresh),validatedHash);
         return issue(outcome,refresh);
     }
     public Tokens refresh(String current) {
