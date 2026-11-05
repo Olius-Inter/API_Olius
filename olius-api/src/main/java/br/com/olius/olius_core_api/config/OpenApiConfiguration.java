@@ -37,6 +37,10 @@ public class OpenApiConfiguration {
             api.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, operation) -> {
                 documentSecurity(path, method, operation);
                 documentResponses(operation);
+                if (path.equals("/api/v1/chat") || path.startsWith("/api/v1/chat/sessions/")) {
+                    operation.getResponses().addApiResponse("502", error("Resposta inválida da assistente."));
+                    operation.getResponses().addApiResponse("504", error("Prazo da assistente excedido; não repetir automaticamente."));
+                }
                 if (!preservesDescription(path))
                     operation.setDescription(description(path, method));
                 documentPevResponse(path, method, operation);
@@ -166,6 +170,10 @@ public class OpenApiConfiguration {
     }
 
     private String description(String path, PathItem.HttpMethod method) {
+        if (path.equals("/api/v1/chat"))
+            return "Encaminha session_id UUID e pergunta (1 a 4000 caracteres) à OlivIA com o access token autenticado. Inicie a conversa antes da primeira mensagem. Sem retry automático; timeout não garante cancelamento remoto.";
+        if (path.startsWith("/api/v1/chat/sessions/"))
+            return "Inicia ou encerra uma conversa da OlivIA com o UUID informado no caminho e o access token autenticado. A IA verifica a titularidade. Não recebe corpo; retorna session_id e resumo. Não confundir conversa com sessão de login.";
         if(path.equals("/api/v1/users/me/deliveries"))
             return "Somente cidadão ativo consulta entregas em que é beneficiário, pela identidade do Bearer. Inclui RECORDED e ANNULLED com volume, datas, pontos, estado e revisão operacional vigentes; não é histórico de auditoria. Retorna 200 com items, page, size e totalElements. Padrões page=0, size=20, máximo 100; ordem deliveryDate DESC, id DESC. Página além do total retorna items vazio e total preservado. Parâmetros vazios, inválidos ou deslocamento acima de Integer.MAX_VALUE retornam 400. ADMIN e estabelecimento recebem 403. Não retorna QR, chave de reenvio ou dados pessoais do responsável. Saldo e revisões de cálculo pertencem a /api/v1/users/me/points.";
         if(path.equals("/api/v1/pevs/me/address"))
