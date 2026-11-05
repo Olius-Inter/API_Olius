@@ -13,7 +13,9 @@ public final class PevResponses {
     public record OwnPev(UUID id, PevStatus status, Instant createdAt, Instant approvedAt,
                          AddressView address) { }
 
-    public record PublicPev(UUID id, AddressView address) { }
+    public record PublicAddress(UUID id,String state,String city,String neighborhood,String street,
+                                String number,String cep,java.math.BigDecimal latitude,java.math.BigDecimal longitude) { }
+    public record PublicPev(UUID id, String name, PublicAddress address) { }
 
     public record PublicPage(List<PublicPev> items, int page, int size, long totalElements) { }
     public record AdminPev(UUID id, PevStatus status, Instant createdAt, Instant updatedAt,
