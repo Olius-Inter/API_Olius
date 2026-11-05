@@ -14,10 +14,11 @@ import br.com.olius.olius_core_api.exception.ResourceNotFoundException;
 import br.com.olius.olius_core_api.exception.BusinessRuleException;
 import br.com.olius.olius_core_api.repository.PevRepository;
 import br.com.olius.olius_core_api.repository.UserRepository;
+import br.com.olius.olius_core_api.repository.AddressMaintenanceRepository;
+import br.com.olius.olius_core_api.repository.PevPublicRepository;
+import org.springframework.transaction.annotation.Isolation;
 import jakarta.persistence.EntityManager;
 import java.util.UUID;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -30,9 +31,13 @@ public class PevService {
     private final PevRepository pevs;
     private final UserRepository users;
     private final AuditContext audit;
+    private final AddressMaintenanceRepository addresses;
+    private final PevPublicRepository publicPevs;
 
-    public PevService(EntityManager em, PevRepository pevs, UserRepository users, AuditContext audit) {
+    public PevService(EntityManager em, PevRepository pevs, UserRepository users, AuditContext audit,
+                      AddressMaintenanceRepository addresses,PevPublicRepository publicPevs) {
         this.em=em; this.pevs=pevs; this.users=users; this.audit=audit;
+        this.addresses=addresses; this.publicPevs=publicPevs;
     }
 
     @Transactional
@@ -64,27 +69,22 @@ public class PevService {
         return own(pev);
     }
 
+    /** Editar um local aprovado exige nova análise; requisições equivalentes não criam revisão. */
     @Transactional
     public OwnPev updateAddress(UpdateAddress request, UUID actor, UserType type) {
         requireOwner(actor,type);
+        if(!addresses.activeActor(actor,type)) throw new AccessDeniedException("Conta indisponível");
         Pev pev=lockOwnPev(actor);
-        if(pev.getStatus()!=PevStatus.PENDING && pev.getStatus()!=PevStatus.REJECTED)
-            throw new BusinessRuleException(BusinessRuleException.Reason.STATE_CONFLICT);
-
+        AddressView previous=addresses.find(pev.getAddressId(),Address.OwnerKind.PEV);
+        if(AddressMaintenanceRepository.same(previous,request.address())) return own(pev);
         audit.user(actor,"Edição do endereço do PEV pelo responsável");
-        AddressInput input=request.address();
-        int changed=em.createNativeQuery("""
-            UPDATE addresses SET state=:state,city=:city,neighborhood=:neighborhood,
-                street=:street,number=:number,cep=:cep,complement=:complement,
-                latitude=:latitude,longitude=:longitude
-            WHERE id=:id AND owner_kind='PEV'
-            """).setParameter("state",input.state()).setParameter("city",input.city())
-            .setParameter("neighborhood",input.neighborhood()).setParameter("street",input.street())
-            .setParameter("number",input.number()).setParameter("cep",input.cep())
-            .setParameter("complement",input.complement()).setParameter("latitude",input.latitude())
-            .setParameter("longitude",input.longitude()).setParameter("id",pev.getAddressId())
-            .executeUpdate();
-        if(changed!=1) throw new IllegalStateException("Endereço próprio do PEV indisponível");
+        addresses.replace(pev.getAddressId(),Address.OwnerKind.PEV,request.address());
+        if(pev.getStatus()==PevStatus.APPROVED) {
+            // Preserva metadados da última aprovação; a próxima decisão registra a nova aprovação.
+            em.createNativeQuery("UPDATE pev SET status='PENDING' WHERE id=:id")
+                .setParameter("id",pev.getId()).executeUpdate();
+            em.refresh(pev);
+        }
         em.refresh(pev.getAddress());
         return own(pev);
     }
@@ -113,14 +113,12 @@ public class PevService {
         return pev;
     }
 
-    @Transactional(readOnly=true)
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    /** Lê total e página no mesmo snapshot; rejeita deslocamentos que excedam o limite contratado. */
     public PublicPage approved(int page, int size) {
         if ((long) page * size > Integer.MAX_VALUE)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-        var result=pevs.findByStatus(PevStatus.APPROVED,
-            PageRequest.of(page,size,Sort.by(Sort.Direction.ASC,"createdAt","id")));
-        return new PublicPage(result.stream().map(pev -> new PublicPev(pev.getId(),address(pev.getAddress())))
-            .toList(),page,size,result.getTotalElements());
+        return publicPevs.approved(page,size);
     }
 
     private void requireOwner(UUID actor, UserType type) {
