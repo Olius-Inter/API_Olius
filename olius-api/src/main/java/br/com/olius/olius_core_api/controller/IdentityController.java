@@ -1,5 +1,6 @@
 package br.com.olius.olius_core_api.controller;
 import br.com.olius.olius_core_api.dto.IdentityRequests.*;
+import br.com.olius.olius_core_api.dto.ProfileUpdate;
 import br.com.olius.olius_core_api.dto.IdentityResponses.*;
 import br.com.olius.olius_core_api.repository.*;
 import br.com.olius.olius_core_api.security.*;
@@ -15,11 +16,12 @@ import org.springframework.web.bind.annotation.*;
 public class IdentityController {
     private final RegistrationService registrations;
     private final ProfileService profiles;
+    private final ProfileUpdateService updates;
     private final EstablishmentTypeRepository types;
     private final AuthSessionRepository sessions;
     public IdentityController(RegistrationService registrations,ProfileService profiles,
-        EstablishmentTypeRepository types,AuthSessionRepository sessions) {
-        this.registrations=registrations; this.profiles=profiles; this.types=types; this.sessions=sessions;
+        EstablishmentTypeRepository types,AuthSessionRepository sessions,ProfileUpdateService updates) {
+        this.registrations=registrations; this.profiles=profiles; this.types=types; this.sessions=sessions; this.updates=updates;
     }
     @PostMapping("/auth/registrations/citizens")
     public ResponseEntity<Registration> citizen(@Valid @RequestBody CitizenRegistration request) {
@@ -28,6 +30,10 @@ public class IdentityController {
     @PostMapping("/auth/registrations/establishments")
     public ResponseEntity<Registration> establishment(@Valid @RequestBody EstablishmentRegistration request) {
         var result=registrations.establishment(request); return ResponseEntity.created(URI.create("/api/v1/users/"+result.id())).body(result);
+    }
+    @PatchMapping("/users/me")
+    public ResponseEntity<Profile> update(@Valid @RequestBody ProfileUpdate request,Authentication auth) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(updates.update(Caller.id(auth),Caller.type(auth),request));
     }
     @GetMapping("/users/me") public Profile me(Authentication auth) { return profiles.get(Caller.id(auth),Caller.id(auth),Caller.type(auth)); }
     @GetMapping("/users/{id}") public Profile user(@PathVariable UUID id,Authentication auth) { return profiles.get(id,Caller.id(auth),Caller.type(auth)); }
