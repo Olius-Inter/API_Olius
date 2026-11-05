@@ -59,10 +59,13 @@ public class CollectionRequestService {
     }
     @Transactional
     public RequestView schedule(UUID id,UUID actor,Scheduling request) {
-        return schedule(id,actor,request,null);
+        return scheduleInternal(id,actor,request,null);
     }
     @Transactional
     public RequestView schedule(UUID id,UUID actor,Scheduling request,UUID key) {
+        return scheduleInternal(id,actor,request,key);
+    }
+    private RequestView scheduleInternal(UUID id,UUID actor,Scheduling request,UUID key) {
         requireActor(actor,true,true);
         var current=find(id,actor,true);
         if(key==null && request.scheduledAt().isBefore(current.requestAt()))
