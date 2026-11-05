@@ -4,8 +4,8 @@
   "files": [
     {
       "file": "01_structure.sql",
-      "sha256": "3a69a7cbe7c54cbe819ef28c7c1498195e3623a7228062952a0f0e191d65b61e",
-      "source_sha256": "3a69a7cbe7c54cbe819ef28c7c1498195e3623a7228062952a0f0e191d65b61e"
+      "sha256": "8a6eccb811e529ce9892f1c742c3ee1c38df181de1a7ea5efd031bf4323c183f",
+      "source_sha256": "5e935922d791af3eae434639d051a1b84aa00b52e5547e17db40d3b7d9bef095"
     },
     {
       "file": "02_check_constraints.sql",
@@ -14,8 +14,8 @@
     },
     {
       "file": "03_indexes.sql",
-      "sha256": "1d7ec1b483f56cabf9c697177d01b4f1d48c8428961dfdc91b65899c7bc77c1f",
-      "source_sha256": "d7d83b84d4f5ad1038630105a135c7938063966c783acc66ca8e9811cb8e2276"
+      "sha256": "fcd4059e7e96e9a788f15a526bff57de436233d3da0f90a43d3224bc79e24058",
+      "source_sha256": "91315831593f0bb0f5f5cd001dfd622624a2aec4c967957d1b865f3580678734"
     },
     {
       "file": "04_functions_procedures.sql",
@@ -24,8 +24,8 @@
     },
     {
       "file": "05_triggers.sql",
-      "sha256": "380e8c00adea38c5037ad0b9e42baa4e58192f107692a48f04029c84d8d467fd",
-      "source_sha256": "380e8c00adea38c5037ad0b9e42baa4e58192f107692a48f04029c84d8d467fd"
+      "sha256": "a75ba09b61e1e2f5d7a3f47818bf3d25f0e20320687504a731b4b2a9700bb252",
+      "source_sha256": "a8f0159cdbca42a2706c6e222cd1b86b2022556be74274da24d1c0fe3750f777"
     },
     {
       "file": "06_ctes.sql",
@@ -44,8 +44,8 @@
     },
     {
       "file": "access_control/01_roles.sql",
-      "sha256": "24175950a6fa7a2c5e835405ec4696a7a4b6273926eb88a1b489f01c62535a02",
-      "source_sha256": "50b431aa9ee70a7ccb6d1b00506234da14851d0d04586c46634c84006c6694dd"
+      "sha256": "099d5c7250ab565b7e784d2d15fa4dec256110b04ac5f86adffc75084a1d99dd",
+      "source_sha256": "a0e6b6604bebe95356f668e491325ab5094e05d09f76dea43a4c547da1c01553"
     },
     {
       "file": "data_catalog/01_structure.sql",

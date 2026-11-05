@@ -924,4 +924,61 @@ CREATE TRIGGER trg_password_reset_no_truncate BEFORE TRUNCATE ON public.password
     FOR EACH STATEMENT EXECUTE FUNCTION public.fn_olius_password_reset_guard();
 CREATE TRIGGER trg_password_reset_audit AFTER INSERT OR UPDATE ON public.password_reset_token
     FOR EACH ROW EXECUTE FUNCTION public.fn_olius_audit_trigger();
+
+CREATE FUNCTION public.notify_pev_status_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $notify$
+DECLARE
+    v_type TEXT;
+    v_title TEXT;
+BEGIN
+    CASE
+        WHEN OLD.status = 'PENDING' AND NEW.status = 'APPROVED' THEN
+            v_type := 'PEV_APPROVED'; v_title := 'PEV aprovado';
+        WHEN OLD.status = 'PENDING' AND NEW.status = 'REJECTED' THEN
+            v_type := 'PEV_REJECTED'; v_title := 'PEV rejeitado';
+        WHEN OLD.status = 'APPROVED' AND NEW.status = 'INACTIVE' THEN
+            v_type := 'PEV_INACTIVATED'; v_title := 'PEV inativado';
+        WHEN OLD.status = 'INACTIVE' AND NEW.status = 'APPROVED' THEN
+            v_type := 'PEV_REACTIVATED'; v_title := 'PEV reativado';
+        ELSE RETURN NEW;
+    END CASE;
+
+    INSERT INTO public.notification (recipient_id, type, title, message, resource_type, resource_id, event_id)
+    VALUES (COALESCE(NEW.citizen_id, NEW.establishment_id), v_type, v_title,
+            'Seu ' || v_title || '.', 'PEV', NEW.id, gen_random_uuid());
+    RETURN NEW;
+END;
+$notify$;
+REVOKE ALL ON FUNCTION public.notify_pev_status_change() FROM PUBLIC;
+
+CREATE TRIGGER trg_notify_pev_status_change
+    AFTER UPDATE OF status ON public.pev
+    FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION public.notify_pev_status_change();
+
+CREATE FUNCTION public.notify_collection_schedule_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $notify$
+DECLARE
+    v_recipient UUID;
+    v_initial BOOLEAN := NEW.previous_scheduled_at IS NULL;
+BEGIN
+    SELECT establishment_id INTO STRICT v_recipient
+    FROM public.collection_request WHERE id = NEW.collection_request_id;
+
+    INSERT INTO public.notification (recipient_id, type, title, message, resource_type, resource_id, event_id)
+    VALUES (v_recipient,
+            CASE WHEN v_initial THEN 'COLLECTION_REQUEST_SCHEDULED' ELSE 'COLLECTION_REQUEST_RESCHEDULED' END,
+            CASE WHEN v_initial THEN 'Coleta agendada' ELSE 'Coleta reagendada' END,
+            CASE WHEN v_initial THEN 'Sua coleta foi agendada.' ELSE 'O horário da sua coleta foi alterado.' END,
+            'COLLECTION_REQUEST', NEW.collection_request_id, NEW.id)
+    ON CONFLICT ON CONSTRAINT uq_notification_event DO NOTHING;
+    RETURN NEW;
+END;
+$notify$;
+REVOKE ALL ON FUNCTION public.notify_collection_schedule_change() FROM PUBLIC;
+
+CREATE TRIGGER trg_notify_collection_schedule_change
+    AFTER INSERT ON public.collection_schedule_history
+    FOR EACH ROW EXECUTE FUNCTION public.notify_collection_schedule_change();
+
 COMMIT;

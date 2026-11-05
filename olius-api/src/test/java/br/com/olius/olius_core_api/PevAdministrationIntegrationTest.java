@@ -22,6 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @Testcontainers @AutoConfigureMockMvc
@@ -175,6 +176,40 @@ class PevAdministrationIntegrationTest {
                 Object.class,administrator().id(),adminAccount.id());
         mvc.perform(get("/api/v1/admin/pevs/{id}",missing)
             .header("Authorization","Bearer "+adminAccess)).andExpect(status().isUnauthorized());
+    }
+
+    @Test void pevNotificationIsPrivateAndPreservesFirstRead() throws Exception {
+        var owner = citizen();
+        String ownerBearer = "Bearer " + login(owner.email());
+        var administrator = administrator();
+        String adminBearer = "Bearer " + login(administrator.email());
+        UUID pev = requestPev(owner.email());
+        setState(pev, "APPROVED", 1, administrator.id());
+        admin().update("UPDATE pev SET status='APPROVED' WHERE id=?", pev);
+
+        var result = mvc.perform(get("/api/v1/notifications")
+                .header("Authorization", ownerBearer).param("unreadOnly", "true"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].type").value("PEV_APPROVED"))
+            .andExpect(jsonPath("$.items[0].resource.id").value(pev.toString()))
+            .andReturn();
+        UUID notice = UUID.fromString(json.readTree(result.getResponse().getContentAsString())
+                .get("items").get(0).get("id").asText());
+
+        mvc.perform(get("/api/v1/notifications").header("Authorization", adminBearer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+        mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", adminBearer))
+            .andExpect(status().isNotFound());
+        mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", ownerBearer))
+            .andExpect(status().isNoContent());
+        var readAt = admin().queryForObject("SELECT read_at FROM notification WHERE id=?",
+                java.sql.Timestamp.class, notice);
+        mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", ownerBearer))
+            .andExpect(status().isNoContent());
+        assertThat(readAt).isNotNull().isEqualTo(admin().queryForObject(
+                "SELECT read_at FROM notification WHERE id=?", java.sql.Timestamp.class, notice));
+        mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization", ownerBearer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.count").value(0));
     }
 
     private UUID citizenPev() throws Exception {

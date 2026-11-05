@@ -25,6 +25,7 @@ BEGIN;
 CREATE TEMP TABLE olius_permission_scope (object_name text PRIMARY KEY) ON COMMIT DROP;
 INSERT INTO olius_permission_scope VALUES
     ('users'),
+    ('notification'),
     ('establishment_type'),
     ('addresses'),
     ('telephone'),
@@ -777,6 +778,14 @@ END $password_reset_routines$;
 REVOKE CREATE ON SCHEMA public FROM olius_auth_owner;
 ALTER FUNCTION public.fn_olius_password_reset_guard() OWNER TO olius_owner;
 REVOKE ALL ON FUNCTION public.fn_olius_password_reset_guard() FROM PUBLIC,olius_api;
+
+
+-- A Core aplica a titularidade; somente as triggers inserem avisos.
+ALTER FUNCTION public.notify_pev_status_change() OWNER TO olius_owner;
+ALTER FUNCTION public.notify_collection_schedule_change() OWNER TO olius_owner;
+SET LOCAL ROLE olius_owner;
+GRANT SELECT, UPDATE (read_at) ON public.notification TO olius_api;
+RESET ROLE;
 
 COMMIT;
 
