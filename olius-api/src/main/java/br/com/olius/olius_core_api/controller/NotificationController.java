@@ -33,18 +33,19 @@ public class NotificationController {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public ResponseEntity<Page> list(@Valid @ModelAttribute Query query, Authentication auth) {
         UUID recipient = Caller.id(auth);
-        String filter = query.unreadOnly() ? " AND read_at IS NULL" : "";
-        long total = count(recipient, filter);
+        boolean unreadOnly = Boolean.TRUE.equals(query.unreadOnly());
+        long total = count(recipient, unreadOnly);
         var items = jdbc.query("""
                 SELECT id, type, title, message, created_at, read_at, resource_type, resource_id
-                FROM public.notification WHERE recipient_id = ?
-                """ + filter + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                FROM public.notification WHERE recipient_id = ? AND (NOT ? OR read_at IS NULL)
+                ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
+                """,
                 (rs, row) -> new Item(rs.getObject("id", UUID.class), rs.getString("type"),
                         rs.getString("title"), rs.getString("message"),
                         rs.getObject("created_at", OffsetDateTime.class),
                         rs.getObject("read_at", OffsetDateTime.class),
                         new Resource(rs.getString("resource_type"), rs.getObject("resource_id", UUID.class))),
-                recipient, query.size(), (long) query.page() * query.size());
+                recipient, unreadOnly, query.size(), (long) query.page() * query.size());
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(new Page(items, query.page(), query.size(), total));
     }
@@ -53,7 +54,7 @@ public class NotificationController {
     @Operation(summary = "Contar avisos não lidos da conta autenticada")
     public ResponseEntity<Count> unreadCount(Authentication auth) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                .body(new Count(count(Caller.id(auth), " AND read_at IS NULL")));
+                .body(new Count(count(Caller.id(auth), true)));
     }
 
     @PutMapping("/{id}/read")
@@ -69,9 +70,11 @@ public class NotificationController {
         return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
     }
 
-    private long count(UUID recipient, String filter) {
-        return jdbc.queryForObject("SELECT count(*) FROM public.notification WHERE recipient_id = ?" + filter,
-                Long.class, recipient);
+    private long count(UUID recipient, boolean unreadOnly) {
+        return jdbc.queryForObject("""
+                SELECT count(*) FROM public.notification
+                WHERE recipient_id = ? AND (NOT ? OR read_at IS NULL)
+                """, Long.class, recipient, unreadOnly);
     }
 
     public record Query(@Min(0) Integer page, @Min(1) @Max(100) Integer size, Boolean unreadOnly) {
