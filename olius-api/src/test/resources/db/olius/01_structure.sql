@@ -1511,3 +1511,15 @@ CREATE TABLE public.notification (
     )
 );
 REVOKE ALL ON public.notification FROM PUBLIC;
+
+-- Guarda a chave mesmo quando a operacao nao muda o horario nem gera historico.
+CREATE TABLE public.collection_schedule_command (
+    request_id UUID NOT NULL REFERENCES public.collection_request(id) ON DELETE CASCADE,
+    idempotency_key UUID NOT NULL,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    agreed_at TIMESTAMPTZ NOT NULL,
+    admin_id UUID NOT NULL,
+    reason TEXT NOT NULL,
+    PRIMARY KEY (request_id, idempotency_key)
+);
+REVOKE ALL ON public.collection_schedule_command FROM PUBLIC;

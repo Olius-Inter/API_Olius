@@ -59,12 +59,16 @@ public class CollectionRequestService {
     }
     @Transactional
     public RequestView schedule(UUID id,UUID actor,Scheduling request) {
+        return schedule(id,actor,request,null);
+    }
+    @Transactional
+    public RequestView schedule(UUID id,UUID actor,Scheduling request,UUID key) {
         requireActor(actor,true,true);
         var current=find(id,actor,true);
-        if(request.scheduledAt().isBefore(current.requestAt()))
+        if(key==null && request.scheduledAt().isBefore(current.requestAt()))
             throw new BusinessRuleException(BusinessRuleException.Reason.INCONSISTENT_DATA);
         audit.user(actor,request.reason());
-        call(()->{ requests.schedule(id,actor,request); return null; });
+        call(()->{ requests.schedule(id,actor,request,key); return null; });
         return find(id,actor,true);
     }
     @Transactional

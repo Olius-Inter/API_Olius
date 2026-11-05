@@ -210,6 +210,32 @@ class CollectionRequestsIntegrationTest {
         mvc.perform(get(ROOT+"/"+request.id()+"/schedule-history").param("page","2").param("size","1")
                 .header("Authorization","Bearer "+account.access())).andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
     }
+    @Test void delayedSchedulingRetryKeepsNewerScheduleAndDoesNotNotifyAgain() throws Exception {
+        var request = create("10");
+        var agreed = Instant.now().minusSeconds(1).truncatedTo(ChronoUnit.MICROS);
+        var first = new Scheduling(agreed.plusSeconds(36000), agreed, REASON);
+        var second = new Scheduling(agreed.plusSeconds(39600), agreed, "Novo acordo");
+        UUID firstKey = UUID.randomUUID();
+        String route = ADMIN + "/" + request.id() + "/scheduling";
+        for (var attempt : List.of(Map.entry(firstKey, first), Map.entry(UUID.randomUUID(), second),
+                Map.entry(firstKey, first))) {
+            mvc.perform(post(route).header("Authorization", "Bearer " + admin.access())
+                    .header("Idempotency-Key", attempt.getKey().toString())
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(attempt.getValue())))
+                .andExpect(status().isOk());
+        }
+        mvc.perform(post(route).header("Authorization", "Bearer " + admin.access())
+                .header("Idempotency-Key", firstKey.toString())
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(second)))
+            .andExpect(status().isConflict());
+        var history = service.history(request.id(), accountId, false, new Pagination(0, 20));
+        assertThat(history.totalElements()).isEqualTo(2);
+        assertThat(history.items().getFirst().newScheduledAt())
+            .isEqualTo(second.scheduledAt().truncatedTo(ChronoUnit.MICROS));
+        assertThat(owner.queryForObject("SELECT count(*) FROM notification WHERE resource_id = ?",
+                Long.class, request.id())).isEqualTo(2L);
+    }
+
     @Test void invalidSchedulingAndRejectionStatesHaveNoPartialEffects() throws Exception {
         var request=create("10");
         mvc.perform(post(ADMIN+"/"+request.id()+"/scheduling").header("Authorization","Bearer "+admin.access())

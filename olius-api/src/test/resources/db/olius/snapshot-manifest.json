@@ -4,8 +4,8 @@
   "files": [
     {
       "file": "01_structure.sql",
-      "sha256": "8a6eccb811e529ce9892f1c742c3ee1c38df181de1a7ea5efd031bf4323c183f",
-      "source_sha256": "5e935922d791af3eae434639d051a1b84aa00b52e5547e17db40d3b7d9bef095"
+      "sha256": "b60491e88d5b8a500b6383144c442db9ded8abb76668bfcbe667e8460ce53db2",
+      "source_sha256": "c5424eb0b7548c64e9b13750ae93048e31e4fbbea7a9e2c71837d72e58b070f7"
     },
     {
       "file": "02_check_constraints.sql",
@@ -19,8 +19,8 @@
     },
     {
       "file": "04_functions_procedures.sql",
-      "sha256": "11070bb020449b3893b1e1b70c4493ee7fcd753e36960e0bf164972a3c3193b5",
-      "source_sha256": "90d02b70462ea30ffd74597085392a6d39d2fd0c10c6fd9011c3c4715666c1ba"
+      "sha256": "f43f453e5c612acba6c8cc6a3618b36636274235990c97a8a60a5d317360788e",
+      "source_sha256": "10967d5a06c16fca630fd4b52451a4547f05ae9836fe618d83a97a509c3ebbcd"
     },
     {
       "file": "05_triggers.sql",
@@ -44,8 +44,8 @@
     },
     {
       "file": "access_control/01_roles.sql",
-      "sha256": "099d5c7250ab565b7e784d2d15fa4dec256110b04ac5f86adffc75084a1d99dd",
-      "source_sha256": "a0e6b6604bebe95356f668e491325ab5094e05d09f76dea43a4c547da1c01553"
+      "sha256": "5d60a08d7b9b1a0d60c46757e5b104090a7e5a509c1c0acbd257cffe2e53dc1c",
+      "source_sha256": "e5316a9aea06385cde1b804f41a5fe5426f178cef8e54fdda69b3ca6547ebdf8"
     },
     {
       "file": "data_catalog/01_structure.sql",

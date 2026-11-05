@@ -26,6 +26,7 @@ CREATE TEMP TABLE olius_permission_scope (object_name text PRIMARY KEY) ON COMMI
 INSERT INTO olius_permission_scope VALUES
     ('users'),
     ('notification'),
+    ('collection_schedule_command'),
     ('establishment_type'),
     ('addresses'),
     ('telephone'),
@@ -783,8 +784,10 @@ REVOKE ALL ON FUNCTION public.fn_olius_password_reset_guard() FROM PUBLIC,olius_
 -- A Core aplica a titularidade; somente as triggers inserem avisos.
 ALTER FUNCTION public.notify_pev_status_change() OWNER TO olius_owner;
 ALTER FUNCTION public.notify_collection_schedule_change() OWNER TO olius_owner;
+ALTER PROCEDURE public.schedule_collection_request_once(UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID,TEXT,UUID) OWNER TO olius_owner;
 SET LOCAL ROLE olius_owner;
 GRANT SELECT, UPDATE (read_at) ON public.notification TO olius_api;
+GRANT EXECUTE ON PROCEDURE public.schedule_collection_request_once(UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID,TEXT,UUID) TO olius_api;
 RESET ROLE;
 
 COMMIT;
