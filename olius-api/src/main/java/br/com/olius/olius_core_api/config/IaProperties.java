@@ -7,7 +7,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("olius.ia")
 public record IaProperties(boolean enabled, URI baseUrl, Duration connectTimeout, Duration requestTimeout) {
     public IaProperties {
-        if (baseUrl == null || !java.util.Set.of("http", "https").contains(baseUrl.getScheme())
+        if (baseUrl == null || baseUrl.getScheme() == null
+                || !java.util.Set.of("http", "https").contains(baseUrl.getScheme())
                 || baseUrl.getHost() == null || baseUrl.getRawUserInfo() != null
                 || baseUrl.getRawQuery() != null || baseUrl.getRawFragment() != null
                 || !(baseUrl.getPath().isEmpty() || baseUrl.getPath().equals("/"))) {

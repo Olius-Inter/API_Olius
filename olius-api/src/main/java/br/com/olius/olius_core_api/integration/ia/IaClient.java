@@ -41,8 +41,7 @@ public final class IaClient implements AutoCloseable {
         var json = post("/sessions/" + sessionId + (start ? "/iniciar" : "/encerrar"), null, accessToken);
         if (!json.path("session_id").isString()
                 || !sessionId.toString().equals(json.path("session_id").asText())
-                || !(json.path("resumo").isMissingNode() || json.path("resumo").isNull()
-                     || json.path("resumo").isString())) {
+                || !(json.path("resumo").isNull() || json.path("resumo").isString())) {
             throw failure(ApiErrorCode.IA_INVALID_RESPONSE);
         }
         return new SessionResponse(sessionId, json.path("resumo").isString() ? json.path("resumo").asText() : null);
@@ -75,17 +74,18 @@ public final class IaClient implements AutoCloseable {
             }
         } catch (TimeoutException timeout) {
             pending.cancel(true);
-            throw failure(ApiErrorCode.IA_TIMEOUT);
+            throw failure(ApiErrorCode.IA_TIMEOUT, timeout);
         } catch (InterruptedException interrupted) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
-            throw failure(ApiErrorCode.IA_UNAVAILABLE);
+            throw failure(ApiErrorCode.IA_UNAVAILABLE, interrupted);
         } catch (ExecutionException unavailable) {
             for (Throwable cause = unavailable.getCause(); cause != null; cause = cause.getCause()) {
-                if (cause instanceof HttpTimeoutException) throw failure(ApiErrorCode.IA_TIMEOUT);
+                if (cause instanceof HttpConnectTimeoutException) throw failure(ApiErrorCode.IA_UNAVAILABLE, cause);
+                if (cause instanceof HttpTimeoutException) throw failure(ApiErrorCode.IA_TIMEOUT, cause);
                 if (cause instanceof IaIntegrationException invalid) throw failure(invalid.getCode());
             }
-            throw failure(ApiErrorCode.IA_UNAVAILABLE);
+            throw failure(ApiErrorCode.IA_UNAVAILABLE, unavailable.getCause());
         }
     }
 
@@ -107,6 +107,10 @@ public final class IaClient implements AutoCloseable {
 
     private static IaIntegrationException failure(ApiErrorCode code) {
         return new IaIntegrationException(code);
+    }
+
+    private static IaIntegrationException failure(ApiErrorCode code, Throwable cause) {
+        return new IaIntegrationException(code, cause);
     }
 
     /** Limita inclusive respostas chunked; não confia no Content-Length externo. */

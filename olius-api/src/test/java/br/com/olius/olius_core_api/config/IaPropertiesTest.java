@@ -9,10 +9,12 @@ import static org.assertj.core.api.Assertions.*;
 
 class IaPropertiesTest {
     @ParameterizedTest
-    @ValueSource(strings = {"file:///tmp/api", "http://user:secret@ia", "http://ia/path", "http://ia?token=x", "http://ia#fragment"})
+    @ValueSource(strings = {"file:///tmp/api", "http://user:secret@ia", "http://ia/path", "http://ia?token=x", "http://ia#fragment",
+        "//ia", "ia", "ia:8000/"})
     void rejectsAmbiguousOrCredentialBearingOrigins(String value) {
         assertThatIllegalArgumentException().isThrownBy(() ->
-                new IaProperties(true, URI.create(value), Duration.ofSeconds(1), Duration.ofSeconds(25)));
+                new IaProperties(true, URI.create(value), Duration.ofSeconds(1), Duration.ofSeconds(25)))
+                .withMessageContaining("OLIUS_IA_BASE_URL");
     }
     @Test void rejectsInvalidTimeouts() {
         assertThatIllegalArgumentException().isThrownBy(() ->

@@ -65,13 +65,15 @@ class ChatControllerTest {
     }
 
     @Test void errorsUseCoreProblemContract() throws Exception {
-        when(ia.chat(any(), anyString())).thenThrow(new IaIntegrationException(ApiErrorCode.IA_TIMEOUT));
+        when(ia.chat(any(), anyString())).thenThrow(new IaIntegrationException(ApiErrorCode.IA_TIMEOUT,
+                new java.net.http.HttpTimeoutException("private-transport-detail")));
         mvc.perform(post("/api/v1/chat").principal(auth).contentType(MediaType.APPLICATION_JSON).content(request("Olá")))
                 .andExpect(status().isGatewayTimeout())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.code").value("IA_TIMEOUT"))
                 .andExpect(header().exists("X-Request-Id"))
-                .andExpect(result -> assertThat(result.getResponse().getContentAsString()).doesNotContain("validated-access-token"));
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("validated-access-token", "private-transport-detail", "HttpTimeoutException"));
     }
 
     private String request(String question) {
