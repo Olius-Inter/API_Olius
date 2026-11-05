@@ -91,7 +91,7 @@ public class SecurityConfiguration {
 
     private CorsConfigurationSource cors(SecurityProperties properties) {
         var config=new CorsConfiguration(); config.setAllowedOrigins(properties.getAllowedOrigins());
-        config.setAllowCredentials(true); config.setAllowedMethods(List.of("GET","POST","PATCH","DELETE","OPTIONS"));
+        config.setAllowCredentials(true); config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization","Content-Type","X-XSRF-TOKEN","Idempotency-Key"));
         config.setExposedHeaders(List.of("X-Request-Id"));
         var source=new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/**",config); return source;

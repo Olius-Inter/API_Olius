@@ -39,7 +39,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         if (factory.status(ex.getCode()).is5xxServerError()) {
             logFailure(ex, ex.getCode(), factory.status(ex.getCode()), request);
         }
-        return response(ex.getCode(), request);
+        var headers = new HttpHeaders();
+        if (ex.getCode() == ApiErrorCode.AUTHENTICATION_REQUIRED) {
+            headers.set(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
+        }
+        return response(ex.getCode(), request, headers);
     }
 
     @ExceptionHandler(AuthenticationException.class)

@@ -21,7 +21,7 @@ O Mobile consome os contratos HTTP; não chama procedures nem acessa o banco.
 | Obter próprio QR | `GET /api/v1/users/me` | Perfil autenticado contém `qrToken`; apresentação visual é responsabilidade do aplicativo. |
 | Solicitar PEV | `POST /api/v1/pevs` | Cidadão ou estabelecimento ativo solicita com endereço próprio do ponto; retorna `201`, PEV `PENDING` e `Location`. |
 | Consultar próprio PEV | `GET /api/v1/pevs/me` | Retorna identidade, situação e endereço do ponto; ausência retorna `404`. |
-| Editar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; somente `PENDING` ou `REJECTED`; preserva IDs e estado. |
+| Editar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; todos os estados; preserva IDs; mudança efetiva em `APPROVED` retorna `PENDING`, demais estados são mantidos. |
 | Reapresentar ponto rejeitado | `POST /api/v1/pevs/me/resubmissions` | Titular ativo; sem corpo; mesmo PEV passa de `REJECTED` para `PENDING`. |
 | Localizar pontos aprovados | `GET /api/v1/pevs` | Consulta pública paginada com endereço e coordenadas disponíveis; somente `APPROVED`. |
 | Consultar PEVs para gestão | `GET /api/v1/admin/pevs` e `GET /api/v1/admin/pevs/{id}` | ADMIN ativo; lista e detalhe administrativos. |
@@ -94,3 +94,10 @@ manual e o comando de verificação automatizada.
   excepcional de QR dependem de alinhamento com os respectivos responsáveis.
 - Certificados e consultas ambientais existentes têm contratos próprios; sua
   presença na Core não implica disponibilidade dessas funcionalidades para cidadão.
+
+## Atualização de perfil/endereço — 05/11/2026
+
+A edição de PEV aprovado retira o ponto do mapa até nova aprovação. A consulta
+pública omite complemento e nome de cidadão, e inclui nome cadastral do
+estabelecimento. Consulte [Perfil e endereços](perfil-enderecos.md) para o contrato
+completo de perfil próprio, endereço comercial e coordenadas.

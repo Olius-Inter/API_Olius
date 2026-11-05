@@ -13,6 +13,11 @@ public abstract class ApiException extends RuntimeException {
         this.code = code;
     }
 
+    protected ApiException(ApiErrorCode code, Throwable cause) {
+        super(Objects.requireNonNull(code).name(), cause);
+        this.code = code;
+    }
+
     public final ApiErrorCode getCode() {
         return code;
     }

@@ -50,18 +50,34 @@ class NotificationIntegrationTest {
         var result = mvc.perform(get("/api/v1/notifications")
                 .header("Authorization", ownerBearer).param("unreadOnly", "true"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.page").value(0)).andExpect(jsonPath("$.size").value(20))
             .andExpect(jsonPath("$.items[0].type").value("PEV_APPROVED"))
             .andExpect(jsonPath("$.items[0].resource.id").value(pev.toString()))
             .andReturn();
         UUID notice = UUID.fromString(json.readTree(result.getResponse().getContentAsString())
                 .get("items").get(0).get("id").asText());
 
+        mvc.perform(get("/api/v1/notifications").header("Authorization", ownerBearer)
+                .param("page", "1").param("size", "1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.page").value(1)).andExpect(jsonPath("$.size").value(1))
+            .andExpect(jsonPath("$.items").isEmpty());
+        mvc.perform(get("/api/v1/notifications").header("Authorization", ownerBearer).param("page", "-1"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/notifications").header("Authorization", ownerBearer).param("size", "101"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization", ownerBearer))
+            .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(jsonPath("$.count").value(1));
+        mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization", adminBearer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.count").value(0));
         mvc.perform(get("/api/v1/notifications").header("Authorization", adminBearer))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
         mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", adminBearer))
             .andExpect(status().isNotFound());
         mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", ownerBearer))
-            .andExpect(status().isNoContent());
+            .andExpect(status().isNoContent()).andExpect(header().string("Cache-Control", "no-store"));
         var readAt = admin().queryForObject("SELECT read_at FROM notification WHERE id=?",
                 java.sql.Timestamp.class, notice);
         mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", ownerBearer))

@@ -6,6 +6,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SafeExceptionDiagnosticTest {
     @Test
+    void iaTransportFailureRetainsOnlySafeRootDiagnostic() {
+        var failure = new IaIntegrationException(
+                br.com.olius.olius_core_api.exception.enums.ApiErrorCode.IA_UNAVAILABLE,
+                new java.net.UnknownHostException("private-host-and-token"));
+        var result = SafeExceptionDiagnostic.from(failure);
+        assertThat(result.rootCauseType()).isEqualTo(java.net.UnknownHostException.class.getName());
+        assertThat(result.toString()).doesNotContain("private-host-and-token");
+        assertThat(failure.getMessage()).isEqualTo("IA_UNAVAILABLE");
+    }
+
+    @Test
     void findsNestedSqlStateWithoutRetainingMessage() {
         var result = SafeExceptionDiagnostic.from(
                 new IllegalStateException("secret", new SQLException("private SQL", "23514")));
