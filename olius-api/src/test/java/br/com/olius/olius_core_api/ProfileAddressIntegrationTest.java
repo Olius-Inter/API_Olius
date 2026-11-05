@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -90,6 +91,7 @@ class ProfileAddressIntegrationTest {
     @Autowired JdbcTemplate limited;
     @Autowired PlatformTransactionManager transactions;
 
+    /** Confere os três perfis, autoria da auditoria e preservação das credenciais e IDs existentes. */
     @ParameterizedTest @ValueSource(strings={"CITIZENS","ESTABLISHMENT","ADMIN"})
     void eachProfileCanEditItselfWithoutChangingCredentialsOrRetainedPhones(String role) throws Exception {
         Account account=account(role);
@@ -104,6 +106,7 @@ class ProfileAddressIntegrationTest {
         mvc.perform(get("/api/v1/auth/session").header("Authorization","Bearer "+account.access())).andExpect(status().isOk());
         assertThat(owner().queryForObject("SELECT bool_and(actor_kind='USER' AND performed_by=id) FROM users_log WHERE id=? AND operation='UPDATE'",Boolean.class,account.id())).isTrue();
     }
+    /** Distingue campo omitido de conjunto vazio e preserva a possibilidade de telefone compartilhado. */
     @Test void omittedFieldsPreserveValuesAndEmptyTelephoneListClearsThem() throws Exception {
         Account account=account("CITIZENS");
         send(patch(PROFILE),account,Map.of("name","Novo nome")).andExpect(status().isOk()).andExpect(jsonPath("$.telephones[0]").value("11999999999"));
@@ -113,6 +116,46 @@ class ProfileAddressIntegrationTest {
         send(patch(PROFILE),account,Map.of("telephones",List.of("11999999999"))).andExpect(status().isOk());
         assertThat(owner().queryForObject("SELECT count(*) FROM telephone WHERE user_id IN (?,?) AND telephone='11999999999'",Integer.class,account.id(),another.id())).isEqualTo(2);
     }
+    /** Exercita os limites do nome via HTTP e comprova ausência de escrita no caso rejeitado. */
+    @ParameterizedTest @CsvSource({"150,200", "151,400"})
+    void profileNameLengthBoundaries(int length, int expectedStatus) throws Exception {
+        Account account=account("CITIZENS");
+        String name="N".repeat(length);
+        send(patch(PROFILE),account,Map.of("name",name)).andExpect(status().is(expectedStatus));
+        if(expectedStatus==200) {
+            assertThat(owner().queryForObject("SELECT name FROM users WHERE id=?",String.class,account.id())).isEqualTo(name);
+        } else assertOriginalProfile(account);
+    }
+
+    /** Exercita o limite superior do telefone pelo DTO realmente vinculado ao PATCH de perfil. */
+    @ParameterizedTest @CsvSource({"15,200", "16,400"})
+    void profileTelephoneLengthBoundaries(int length, int expectedStatus) throws Exception {
+        Account account=account("CITIZENS");
+        String number="1".repeat(length);
+        send(patch(PROFILE),account,Map.of("telephones",List.of(number))).andExpect(status().is(expectedStatus));
+        if(expectedStatus==200) {
+            assertThat(owner().queryForList("SELECT telephone FROM telephone WHERE user_id=?",String.class,account.id())).containsExactly(number);
+        } else assertOriginalProfile(account);
+    }
+
+    /** Confirma os extremos geográficos e rejeita seus vizinhos externos no endpoint comercial. */
+    @ParameterizedTest @CsvSource({
+        "-90,0,200", "90,0,200", "0,-180,200", "0,180,200",
+        "-90.000001,0,400", "90.000001,0,400", "0,-180.000001,400", "0,180.000001,400"
+    })
+    void commercialCoordinateBoundaries(BigDecimal latitude, BigDecimal longitude, int expectedStatus) throws Exception {
+        Account company=account("ESTABLISHMENT");
+        var address=postal("Rua nos limites");address.put("latitude",latitude);address.put("longitude",longitude);
+        send(put(ADDRESS),company,Map.of("address",address)).andExpect(status().is(expectedStatus));
+        if(expectedStatus==200) {
+            assertThat(owner().queryForObject("SELECT a.latitude FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",BigDecimal.class,company.id())).isEqualByComparingTo(latitude);
+            assertThat(owner().queryForObject("SELECT a.longitude FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",BigDecimal.class,company.id())).isEqualByComparingTo(longitude);
+        } else {
+            assertThat(owner().queryForObject("SELECT a.street FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,company.id())).isEqualTo("Rua comercial");
+        }
+    }
+
+    /** Rejeita entradas estruturais inválidas sem alterar nome ou telefones persistidos. */
     @ParameterizedTest @ValueSource(strings={"{}","{\"name\":null}","{\"name\":\"   \"}",
         "{\"telephones\":null}","{\"telephones\":[null]}","{\"telephones\":[\"          \"]}",
         "{\"telephones\":[\"123\"]}","{\"telephones\":[\"11999999999\",\"11999999999\"]}"})
@@ -122,6 +165,7 @@ class ProfileAddressIntegrationTest {
             .andExpect(status().isBadRequest());
         assertOriginalProfile(account);
     }
+    /** Confere que campos fora do contrato não permitem alterar identidade ou privilégios. */
     @ParameterizedTest @ValueSource(strings={"email","password","passwordHash","cpf","cnpj","address","userType","status","points","qrToken","id","namePresent","telephonesPresent"})
     void protectedAndUnknownProfileFieldsAreRejected(String field) throws Exception {
         Account account=account("CITIZENS");
@@ -129,6 +173,7 @@ class ProfileAddressIntegrationTest {
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
         assertOriginalProfile(account);
     }
+    /** Reenvio equivalente não recria telefones nem produz atualização fictícia de nome. */
     @Test void sameProfilePreservesTelephoneIdsAndDoesNotCreateNameAudit() throws Exception {
         Account account=account("CITIZENS");
         UUID phone=owner().queryForObject("SELECT id FROM telephone WHERE user_id=?",UUID.class,account.id());
@@ -136,12 +181,14 @@ class ProfileAddressIntegrationTest {
         assertThat(owner().queryForObject("SELECT id FROM telephone WHERE user_id=?",UUID.class,account.id())).isEqualTo(phone);
         assertThat(owner().queryForObject("SELECT count(*) FROM users_log WHERE id=? AND operation='UPDATE'",Integer.class,account.id())).isZero();
     }
+    /** Injeta falha na persistência e comprova atomicidade de nome, telefones e auditoria. */
     @Test void phoneSqlFailureRollsBackNameAndRemovalOfOldPhones() throws Exception {
         Account account=account("CITIZENS");
         send(patch(PROFILE),account,Map.of("name","Não confirmar","telephones",List.of("0000000000"))).andExpect(status().isInternalServerError());
         assertOriginalProfile(account);
         assertThat(owner().queryForObject("SELECT count(*) FROM users_log WHERE id=? AND operation='UPDATE'",Integer.class,account.id())).isZero();
     }
+    /** Disputa duas substituições completas e exige um conjunto final íntegro de um dos pedidos. */
     @Test void concurrentPhoneReplacementsLeaveOneCompleteSet() throws Exception {
         Account account=account("CITIZENS");var start=new CountDownLatch(1);
         var one=new ProfileUpdate();one.setTelephones(List.of("1111111111","2222222222"));
@@ -154,11 +201,13 @@ class ProfileAddressIntegrationTest {
         List<String> stored=owner().queryForList("SELECT telephone FROM telephone WHERE user_id=? ORDER BY telephone",String.class,account.id());
         assertThat(stored.equals(one.getTelephones()) || stored.equals(two.getTelephones())).isTrue();
     }
+    /** Confere rejeição de chamadas anônimas e JWT de conta inativada antes da escrita. */
     @Test void missingAuthenticationAndInactiveSessionsCannotEdit() throws Exception {
         mvc.perform(patch(PROFILE).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Novo\"}")).andExpect(status().isUnauthorized());
         Account account=account("CITIZENS");owner().update("UPDATE users SET status='INACTIVE' WHERE id=?",account.id());
         send(patch(PROFILE),account,Map.of("name","Não aplicar")).andExpect(status().isUnauthorized());assertOriginalProfile(account);
     }
+    /** Separa cadastro comercial de assinatura e endereço do ponto, incluindo limpeza de opcionais. */
     @Test void commercialAddressNeedsNoSubscriptionAndNeverChangesPevAddress() throws Exception {
         Account company=account("ESTABLISHMENT");UUID pev=pev(company,"APPROVED");
         UUID commercial=owner().queryForObject("SELECT address_id FROM establishment WHERE id=?",UUID.class,company.id());
@@ -170,6 +219,7 @@ class ProfileAddressIntegrationTest {
         assertThat(owner().queryForObject("SELECT street FROM addresses WHERE id=?",String.class,ownPev)).isEqualTo("Rua do PEV");
         assertThat(owner().queryForObject("SELECT status::text FROM pev WHERE id=?",String.class,pev)).isEqualTo("APPROVED");
     }
+    /** Exercita autorização, estrutura e precisão de coordenadas sem permitir escrita parcial. */
     @Test void addressEndpointRequiresEstablishmentAndCompleteFields() throws Exception {
         for(String role:List.of("CITIZENS","ADMIN")) send(put(ADDRESS),account(role),Map.of("address",postal("Rua nova"))).andExpect(status().isForbidden());
         mvc.perform(put(ADDRESS).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized());
@@ -180,6 +230,7 @@ class ProfileAddressIntegrationTest {
         var extra=postal("Rua nova");extra.put("ownerId",UUID.randomUUID());send(put(ADDRESS),company,Map.of("address",extra)).andExpect(status().isBadRequest());
         assertThat(owner().queryForObject("SELECT a.street FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,company.id())).isEqualTo("Rua comercial");
     }
+    /** Bloqueia mudança de local com visita aberta, mas permite reenvio do cadastro equivalente. */
     @Test void pendingOrApprovedUnattendedRequestBlocksAddressChangeButNoopIsAllowed() throws Exception {
         Account company=account("ESTABLISHMENT");cycle(company);UUID request=createRequest(company);Account admin=account("ADMIN");
         for(String state:List.of("PENDING","APPROVED")) {
@@ -188,6 +239,7 @@ class ProfileAddressIntegrationTest {
             send(put(ADDRESS),company,Map.of("address",postal("Rua comercial"))).andExpect(status().isOk());
         }
     }
+    /** Permite manter o cadastro após rejeição ou cancelamento do pedido sem visita. */
     @ParameterizedTest @ValueSource(strings={"REJECTED","CANCELLED"})
     void terminalUnattendedRequestDoesNotBlockAddressChange(String state) throws Exception {
         Account company=account("ESTABLISHMENT");cycle(company);UUID request=createRequest(company);
@@ -195,6 +247,7 @@ class ProfileAddressIntegrationTest {
         else send(post("/api/v1/collection-requests/"+request+"/cancellation"),company,Map.of("reason","Cadastro incorreto")).andExpect(status().isOk());
         send(put(ADDRESS),company,Map.of("address",postal("Novo local"))).andExpect(status().isOk());
     }
+    /** Registra atendimento real e comprova que o estado APPROVED não bloqueia manutenção indefinida. */
     @Test void completedCollectionDoesNotBlockCommercialAddressMaintenance() throws Exception {
         Account company=account("ESTABLISHMENT");cycle(company);UUID request=createRequest(company);Account admin=account("ADMIN");schedule(request,admin);
         UUID driver=UUID.randomUUID();String document=document(11);owner().update("INSERT INTO driver(id,name,cpf,cnh) VALUES (?,'Fixture',?,?)",driver,document,document);
@@ -244,6 +297,7 @@ class ProfileAddressIntegrationTest {
         }
         assertThat(owner().queryForObject("SELECT a.street FROM addresses a JOIN establishment e ON e.address_id=a.id WHERE e.id=?",String.class,company.id())).isEqualTo("Novo cadastro");
     }
+    /** Confere retirada do mapa, flag derivada e necessidade de nova decisão administrativa. */
     @Test void approvedPevAddressChangeLeavesMapAndRequiresNewApproval() throws Exception {
         Account company=account("ESTABLISHMENT");UUID pev=pev(company,"APPROVED");
         Timestamp approval=owner().queryForObject("SELECT approved_at FROM pev WHERE id=?",Timestamp.class,pev);
@@ -252,12 +306,14 @@ class ProfileAddressIntegrationTest {
         assertThat(owner().queryForObject("SELECT approved_at FROM pev WHERE id=?",Timestamp.class,pev)).isEqualTo(approval);
         send(patch("/api/v1/admin/pevs/"+pev+"/status"),account("ADMIN"),Map.of("status","APPROVED")).andExpect(status().isOk());assertThat(publicItem(pev)).isPresent();
     }
+    /** Mudanças apenas na escala das coordenadas não alteram aprovação nem geram revisão. */
     @Test void equivalentPevAddressDoesNotWithdrawApprovedPointOrCreateAddressAudit() throws Exception {
         Account company=account("ESTABLISHMENT");UUID pev=pev(company,"APPROVED");UUID address=owner().queryForObject("SELECT address_id FROM pev WHERE id=?",UUID.class,pev);
         var same=postal("Rua do PEV");same.put("latitude",new BigDecimal("-23.5505000"));
         send(patch("/api/v1/pevs/me/address"),company,Map.of("address",same)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPROVED"));
         assertThat(owner().queryForObject("SELECT count(*) FROM addresses_log WHERE id=? AND operation='UPDATE'",Integer.class,address)).isZero();
     }
+    /** Falha ao retornar para análise desfaz endereço e flag derivada na mesma transação. */
     @Test void addressAndReviewRollbackTogetherWhenPevWriteFails() throws Exception {
         Account company=account("ESTABLISHMENT");UUID pev=pev(company,"APPROVED");owner().update("INSERT INTO test_support.fail_pev(id) VALUES (?)",pev);
         send(patch("/api/v1/pevs/me/address"),company,Map.of("address",postal("Não confirmar"))).andExpect(status().isInternalServerError());
@@ -265,6 +321,7 @@ class ProfileAddressIntegrationTest {
         assertThat(owner().queryForObject("SELECT a.street FROM addresses a JOIN pev p ON p.address_id=a.id WHERE p.id=?",String.class,pev)).isEqualTo("Rua do PEV");
         assertThat(owner().queryForObject("SELECT is_pev FROM establishment WHERE id=?",Boolean.class,company.id())).isTrue();
     }
+    /** Contrasta a projeção pública mínima com os dados permitidos ao titular e ao administrador. */
     @Test void publicPevProjectionOmitsComplementAndCitizenNameButPrivateViewsRetainComplement() throws Exception {
         Account citizen=account("CITIZENS"),company=account("ESTABLISHMENT");UUID first=pev(citizen,"APPROVED"),second=pev(company,"APPROVED");
         JsonNode individual=publicItem(first).orElseThrow(),business=publicItem(second).orElseThrow();
@@ -274,6 +331,7 @@ class ProfileAddressIntegrationTest {
         Account admin=account("ADMIN");mvc.perform(get("/api/v1/admin/pevs/"+second).header("Authorization","Bearer "+admin.access())).andExpect(status().isOk()).andExpect(jsonPath("$.address.complement").value("Portão lateral"));
         send(patch(PROFILE),company,Map.of("name","Nome comercial novo")).andExpect(status().isOk());assertThat(publicItem(second).orElseThrow().path("name").asText()).isEqualTo("Nome comercial novo");
     }
+    /** Verifica preflight do novo método e a separação dos schemas públicos e privados. */
     @Test void corsAllowsPutAndOpenApiDocumentsTheNewContracts() throws Exception {
         mvc.perform(options(ADDRESS).header("Origin","https://frontend.test").header("Access-Control-Request-Method","PUT")
             .header("Access-Control-Request-Headers","authorization,content-type")).andExpect(status().isOk());
@@ -317,6 +375,7 @@ class ProfileAddressIntegrationTest {
         assertThat(owner().queryForObject("SELECT name FROM users WHERE id=?",String.class,account.id())).isEqualTo("Titular");
         assertThat(owner().queryForList("SELECT telephone FROM telephone WHERE user_id=?",String.class,account.id())).containsExactly("11999999999");
     }
+    /** Cria titular pelo cadastro real, exceto a fixture privilegiada de ADMIN, e obtém JWT por login. */
     private Account account(String role) throws Exception {
         String email=UUID.randomUUID()+"@example.invalid";UUID id;
         if(role.equals("ADMIN")) {
@@ -335,6 +394,7 @@ class ProfileAddressIntegrationTest {
         var response=mvc.perform(post("/api/v1/auth/mobile/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("email",email,"password",PASSWORD)))).andExpect(status().isOk()).andReturn();
         return new Account(id,email,json.readTree(response.getResponse().getContentAsString()).path("accessToken").asText());
     }
+    /** Solicita um PEV real e prepara o estado desejado apenas como fixture de teste. */
     private UUID pev(Account account,String state) throws Exception {
         var response=send(post("/api/v1/pevs"),account,Map.of("address",postal("Rua do PEV"))).andExpect(status().isCreated()).andReturn();
         UUID id=UUID.fromString(json.readTree(response.getResponse().getContentAsString()).path("id").asText());
@@ -345,6 +405,7 @@ class ProfileAddressIntegrationTest {
         }
         return id;
     }
+    /** Localiza um ponto na página pública para comprovar presença ou retirada do mapa. */
     private Optional<JsonNode> publicItem(UUID id) throws Exception {
         var response=mvc.perform(get("/api/v1/pevs").param("size","100")).andExpect(status().isOk()).andReturn();
         for(var item:json.readTree(response.getResponse().getContentAsString()).path("items"))
@@ -377,10 +438,12 @@ class ProfileAddressIntegrationTest {
         Instant now=Instant.now();send(post("/api/v1/admin/collection-requests/"+request+"/scheduling"),admin,
             Map.of("scheduledAt",now.plusSeconds(3600).toString(),"agreedAt",now.toString(),"reason","Acordado")).andExpect(status().isOk());
     }
+    /** Gera identificador fictício com o comprimento requerido, sem usar documento pessoal real. */
     private static String document(int digits) { return digits==11 ? Long.toString(ThreadLocalRandom.current().nextLong(10000000000L,99999999999L)) : Long.toString(ThreadLocalRandom.current().nextLong(10000000000000L,99999999999999L)); }
     private static int backend(Connection connection) throws Exception {
         try(var statement=connection.createStatement();var result=statement.executeQuery("SELECT pg_backend_pid()")) { result.next();return result.getInt(1); }
     }
+    /** Aguarda evidência de bloqueio no PostgreSQL, evitando inferir concorrência por atrasos fixos. */
     private static void waitForBlock(int pid) {
         await().atMost(Duration.ofSeconds(10)).until(() -> owner().queryForObject("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid)))",Boolean.class,pid));
     }

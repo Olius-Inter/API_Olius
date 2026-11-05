@@ -216,6 +216,7 @@ class PevIntegrationTest {
         }
     }
 
+    /** Exercita titulares cidadão/estabelecimento em todos os estados, preservando IDs e endereço comercial. */
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({
         "false,PENDING", "false,REJECTED", "false,APPROVED", "false,INACTIVE",
@@ -1105,6 +1106,7 @@ class PevIntegrationTest {
             .andExpect(status().isNotFound());
     }
 
+    /** Verifica que as operações públicas e do titular documentam segurança, revisão e reapresentação distintas. */
     @Test void openApiShowsPublicListingAndAuthenticatedOwnerOperations() throws Exception {
         var response=mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var paths=json.readTree(response.getResponse().getContentAsString()).get("paths");
