@@ -70,6 +70,13 @@ class NotificationIntegrationTest {
                 "SELECT read_at FROM notification WHERE id=?", java.sql.Timestamp.class, notice));
         mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization", ownerBearer))
             .andExpect(status().isOk()).andExpect(jsonPath("$.count").value(0));
+        mvc.perform(get("/api/v1/notifications").header("Authorization", ownerBearer)
+                .param("unreadOnly", "true"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0))
+            .andExpect(jsonPath("$.items").isEmpty());
+        mvc.perform(get("/api/v1/notifications").header("Authorization", ownerBearer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(notice.toString()));
     }
 
     private Account citizen() throws Exception {
