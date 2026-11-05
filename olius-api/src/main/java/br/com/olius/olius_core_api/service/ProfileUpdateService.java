@@ -27,6 +27,7 @@ public class ProfileUpdateService {
         if(request.hasTelephones()) replacePhones(actor,request);
         return profiles.get(actor,actor,role);
     }
+    /** Aplica o conjunto completo sob o lock do titular, preservando IDs dos telefones mantidos. */
     private void replacePhones(UUID actor,ProfileUpdate request) {
         var remaining=new HashSet<>(request.getTelephones());
         for(var current:repository.phones(actor)) {

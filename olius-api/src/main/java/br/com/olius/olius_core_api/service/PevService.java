@@ -114,6 +114,7 @@ public class PevService {
     }
 
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    /** Lê total e página no mesmo snapshot; rejeita deslocamentos que excedam o limite contratado. */
     public PublicPage approved(int page, int size) {
         if ((long) page * size > Integer.MAX_VALUE)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);

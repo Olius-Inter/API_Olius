@@ -5,6 +5,7 @@ import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 
 public class PairedCoordinatesValidator implements ConstraintValidator<PairedCoordinates,AddressInput> {
+    /** Aceita ausência do endereço para @NotNull tratá-la; coordenadas devem formar par com até seis casas decimais. */
     @Override public boolean isValid(AddressInput value,ConstraintValidatorContext context) {
         if(value==null) return true;
         if((value.latitude()==null)!=(value.longitude()==null)) return false;

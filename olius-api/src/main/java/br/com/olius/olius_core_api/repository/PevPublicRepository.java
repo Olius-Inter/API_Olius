@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 public class PevPublicRepository {
     private final JdbcTemplate jdbc;
     public PevPublicRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
+    /** Pagina somente pontos aprovados, sem carregar complemento ou identidade do responsável cidadão. */
     public PublicPage approved(int page,int size) {
         Long total=jdbc.queryForObject("SELECT count(*) FROM public.pev WHERE status='APPROVED'",Long.class);
         var items=jdbc.query("""
