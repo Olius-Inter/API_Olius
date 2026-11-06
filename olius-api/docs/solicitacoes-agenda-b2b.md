@@ -104,6 +104,26 @@ O ADMIN envia ao endpoint scheduling:
 }
 ```
 
+Enviar também `Idempotency-Key: <UUID da ação>`. Gerar antes da primeira tentativa,
+preservar a mesma chave/corpo nos reenvios e criar outra somente para outra ação.
+A Core encaminha a chave para `schedule_collection_request_once` em transação
+READ COMMITTED. Não consulta nem grava a tabela interna de comandos diretamente.
+
+Reenvio conhecido retorna o estado atual do pedido sem desfazer reagendamentos
+posteriores e sem duplicar histórico ou avisos. Uma ação sem mudança de horário
+também guarda a chave. A mesma chave com outro horário, acordo, administrador ou
+motivo (comparado após trim no banco) retorna 409.
+
+O header é opcional para compatibilidade com clientes anteriores; sem ele, usa a
+rotina antiga e não protege reenvios atrasados após outra alteração. Os clientes
+atualizados devem enviá-lo desde a primeira tentativa. Após timeout, preservar
+chave e corpo; não assumir falha ou criar outra ação automaticamente.
+
+Conflitos de serialização/deadlock são devolvidos como 409 CONCURRENT_MODIFICATION.
+A transação falha é desfeita. Uma repetição deve iniciar outra requisição/transação
+com a mesma chave e dados; não se repete apenas o CALL no snapshot antigo nem se
+interpreta 40001 como sucesso. Não há retry automático neste endpoint.
+
 O acordo deve ter ocorrido antes de seu registro. O horário não pode anteceder a
 solicitação. PENDING é aprovado junto do agendamento; não há aprovação sem horário.
 APPROVED pode ser reagendado enquanto não houver chegada/coleta. O horário anterior,

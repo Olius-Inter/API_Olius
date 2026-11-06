@@ -32,7 +32,7 @@ public class CollectionRequestAdministrationController {
         return service.history(id,Caller.id(auth),true,query);
     }
     @PostMapping("/{id}/scheduling")
-    @Operation(summary="Agendar ou reagendar coleta",description="Informe scheduledAt, agreedAt e reason. Datas ISO-8601 com offset ou UTC. Aprova PENDING com horário e reagenda APPROVED sem chegada ou coleta. Envie Idempotency-Key (UUID) e reutilize a chave com o mesmo corpo em cada tentativa. O reenvio retorna o estado atual da solicitação. Usar a mesma chave com outros dados retorna 409.")
+    @Operation(summary="Agendar ou reagendar coleta",description="Informe scheduledAt, agreedAt e reason. Datas ISO-8601 com offset ou UTC. Aprova PENDING com horário e reagenda APPROVED sem chegada ou coleta. Envie Idempotency-Key (UUID) e reutilize a chave com o mesmo corpo em cada tentativa. O reenvio retorna o estado atual da solicitação. Usar a mesma chave com outros dados retorna 409. Header opcional por compatibilidade: sem ele, não há proteção contra reenvio antigo após reagendamento. Conflito concorrente exige nova tentativa HTTP com a mesma chave e corpo, nunca outra chave automática.")
     public RequestView schedule(@PathVariable UUID id,@Valid @RequestBody Scheduling request,
             @RequestHeader(value="Idempotency-Key",required=false) UUID key,Authentication auth) {
         return service.schedule(id,Caller.id(auth),request,key);

@@ -25,7 +25,7 @@ O PostgreSQL é a fonte da pontuação consolidada. Na arquitetura aprovada para
 
 ## 3. Regras funcionais aprovadas
 
-- **PEV:** transições permitidas `PENDING → APPROVED/REJECTED`, `REJECTED → PENDING`, `APPROVED → INACTIVE` e `INACTIVE → APPROVED`. `REJECTED → PENDING` reapresenta o mesmo PEV, pois a unicidade também abrange rejeitados. Não há transferência de responsável no MVP. O proprietário só edita o endereço próprio do PEV em `PENDING` ou `REJECTED`.
+- **PEV:** transições permitidas `PENDING → APPROVED/REJECTED`, `REJECTED → PENDING`, `APPROVED → INACTIVE` e `INACTIVE → APPROVED`. `REJECTED → PENDING` reapresenta o mesmo PEV, pois a unicidade também abrange rejeitados. Não há transferência de responsável no MVP. O proprietário edita o endereço próprio em todos os estados; uma mudança efetiva em `APPROVED` retorna o PEV para `PENDING`, exigindo nova análise. `INACTIVE` permanece inativo e `REJECTED` exige reapresentação separada. Veja [perfil e endereços](perfil-enderecos.md).
 - **Localização:** consulta pública apenas de PEVs `APPROVED`, com endereço próprio do ponto e coordenadas disponíveis. Não divulgar dados pessoais adicionais do responsável. O contrato da consulta geográfica do mapa ainda precisa ser definido.
 - **QR:** cada titular mantém o token único gerado no cadastro; leituras e entregas não geram nem substituem o token. Não há rotação pelo titular nem renovação periódica no MVP. Somente o responsável ativo por PEV aprovado pode identificar um cidadão ativo pelo QR no contexto de entrega, recebendo identificação mínima. O token de estabelecimento não identifica beneficiário B2C. Autoentrega é proibida. Uma eventual substituição excepcional do token exige contrato próprio.
 - **Entrega:** `deliveryDate` é a data física obrigatória, não futura. Lançamento retroativo é permitido sem limite arbitrário de dias. Registra-se somente volume aceito, com pontos calculados por evento no banco.
@@ -40,7 +40,7 @@ As rotas abaixo estão implementadas, exceto as linhas marcadas como **não impl
 | Solicitar PEV | `POST /api/v1/pevs` | Cidadão/estabelecimento ativo; responsável do token. `201` com `Location` e PEV criado. |
 | Consultar próprio PEV | `GET /api/v1/pevs/me` | Responsável ativo. `200` com o próprio ponto; `404` quando ausente. |
 | Reapresentar PEV rejeitado | `POST /api/v1/pevs/me/resubmissions` | Titular ativo; sem corpo; `REJECTED → PENDING`, `200` com o mesmo PEV. |
-| Alterar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; somente `PENDING` ou `REJECTED`; `200` com o próprio PEV atualizado. |
+| Alterar endereço próprio | `PATCH /api/v1/pevs/me/address` | Titular ativo; endereço completo; `APPROVED` volta a `PENDING` após mudança; demais estados são mantidos; `200` com o próprio PEV atualizado. |
 | Localizar PEVs | `GET /api/v1/pevs` | Público; somente `APPROVED`, com endereço e coordenadas disponíveis. Paginação 0/20, máximo 100; busca geográfica pendente. |
 | Listar/detalhar PEVs para gestão | `GET /api/v1/admin/pevs` e `GET /api/v1/admin/pevs/{id}` | ADMIN; fila, estados e detalhe autorizado, com paginação na lista. |
 | Mudar estado | `PATCH /api/v1/admin/pevs/{id}/status` | ADMIN ativo; transições administrativas permitidas. `200` com detalhe atualizado. |
@@ -132,7 +132,7 @@ Nesta etapa, `POST /api/v1/pevs` recebe apenas `address`, cria um endereço `own
 
 `PATCH /api/v1/admin/pevs/{id}/status` exige ADMIN ativo e recebe apenas `{"status":"APPROVED"}` (ou outro estado de destino). Permite `PENDING → APPROVED/REJECTED`, `APPROVED → INACTIVE` e `INACTIVE → APPROVED`; outras transições, inclusive repetição do mesmo estado e reapresentação de `REJECTED`, retornam `409`. ID inexistente retorna `404`. Sucesso retorna `200` com o detalhe atualizado do PEV.
 
-A primeira aprovação define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e é executada por POST /api/v1/pevs/me/resubmissions.
+Cada aprovação a partir de PENDING define `approvedAt` pelo relógio do PostgreSQL e `approvedBy` pelo ADMIN autenticado, inclusive após revisão de endereço. Inativação e reativação preservam esses campos como registro da aprovação original; a auditoria da atualização identifica o ADMIN que executou cada transição. A linha do PEV é bloqueada na transação antes de validar o estado, para serializar decisões concorrentes. A API não atualiza `establishment.is_pev` diretamente: a trigger do banco sincroniza esse campo na mesma transação. A reapresentação `REJECTED → PENDING` pertence ao titular e é executada por POST /api/v1/pevs/me/resubmissions.
 
 ### Gestão administrativa de entregas implementada
 
@@ -191,18 +191,17 @@ Ambas exigem conta ativa `CITIZENS` ou `ESTABLISHMENT`. O titular é derivado do
 Bearer; não recebem ID de PEV, responsável, aprovação ou estado no corpo.
 ADMIN não executa essas ações em nome do proprietário.
 
-A edição aceita somente `PENDING` ou `REJECTED`, sem alterar o estado. Embora a
+A edição aceita todos os estados; mudança material em `APPROVED` volta a `PENDING`, retirando o ponto da lista pública até nova aprovação. `INACTIVE` permanece inativo, e `REJECTED` continua exigindo reapresentação separada. Reenvio equivalente não cria revisão. Embora a
 rota use PATCH, o objeto `address` representa a substituição completa dos campos
 editáveis: campos postais obrigatórios devem ser enviados; complemento e coordenadas
 podem ser nulos. Campos opcionais omitidos serão nulos, não preservados implicitamente.
 Reutilizar as validações do cadastro: UF com duas letras maiúsculas, CEP com oito
-dígitos, limites textuais existentes e faixas de latitude/longitude. Não introduzir
-novos campos ou regras geográficas. Preservar o ID do endereço, `owner_kind=PEV`,
+dígitos e limites textuais existentes. Na edição, latitude/longitude são um par ou ambas nulas, com limites geográficos existentes e precisão de até seis casas decimais significativas, sem geocodificação automática. Preservar o ID do endereço, `owner_kind=PEV`,
 o vínculo `address_id` e o endereço pessoal/comercial do responsável.
 
 A reapresentação permite somente `REJECTED → PENDING`; preserva ID, responsável,
 endereço e data de criação, sem criar registros substitutos. Editar o endereço e
-reapresentar são ações separadas: a primeira não solicita nova análise automaticamente.
+reapresentar são ações separadas quando o ponto está REJECTED; a edição de um ponto APPROVED, por sua vez, exige nova análise automaticamente.
 Repetir a reapresentação quando o PEV já estiver `PENDING` retorna conflito.
 
 Cada escrita usa transação, localiza exclusivamente o ponto do titular e bloqueia
@@ -226,7 +225,7 @@ solicitação → rejeição → edição → reapresentação → aprovação p
 
 1. Toda escrita abre transação, deriva a identidade do Bearer, verifica perfil e titularidade e chama `AuditContext.user` antes da alteração.
 2. Criação de PEV persiste endereço PEV e PEV na mesma transação. A unicidade do banco fecha corridas de duas solicitações.
-3. Gestão de PEV aplica apenas as transições aprovadas na seção 3. Reapresentação reutiliza o PEV rejeitado; não há troca de responsável. Alteração de endereço pelo proprietário exige `PENDING` ou `REJECTED`. A API nunca escreve `establishment.is_pev`.
+3. Gestão de PEV aplica apenas as transições aprovadas na seção 3. Reapresentação reutiliza o PEV rejeitado; não há troca de responsável. Alteração material de endereço de PEV APPROVED retorna PENDING e exige nova aprovação; INACTIVE permanece inativo, e REJECTED exige reapresentação separada. A API nunca escreve `establishment.is_pev`.
 4. Registro usa `CALL record_pev_delivery` com OUT e a conexão transacional gerenciada. Na criação, resolve QR vigente e verifica o PEV aprovado. Na recuperação, encontra a operação por chave e validador autenticado antes da resolução de QR e não bloqueia pelo estado atual do PEV. A procedure confere o payload original. A API não grava entrega, pontos ou saldo por `save` genérico. Após procedure/trigger, relê projeções necessárias para evitar entidade JPA desatualizada.
 5. Correção usa `CALL correct_pev_delivery` com `expectedRevision` fornecida pelo cliente. Em `40001`, retorna conflito para releitura; não troca a revisão nem repete automaticamente.
 6. Identificação por QR apenas consulta o token único gerado no cadastro; não o altera nem grava o segredo em logs ou em registros de entrega. Uma eventual substituição excepcional fica fora do MVP e depende de contrato próprio.
@@ -250,3 +249,5 @@ Os testes das próximas PRs devem usar `OfficialPostgres`, a role limitada e req
 | Contrato de leitura restrita da pontuação consolidada pelo Redis, inclusive recorte anual e atualizações após correção, sem publicação HTTP por operação pela Core. | Sprint 5 |
 
 **Critério da integração:** validar e documentar a jornada disponível, mantendo explícitas as capacidades ainda não implementadas. Decisões que alterem contratos consumidos por Mobile/Frontend, estrutura ou permissões do banco, ou regras de negócio devem ser alinhadas com os respectivos responsáveis. Escolhas técnicas internas seguem os contratos acima.
+
+Evolução de 05/11/2026: consulta pública usa endereço sem complemento e expõe nome somente de estabelecimento (null para cidadão). Perfil, endereço comercial e nova matriz de edição estão detalhados em [perfil e endereços](perfil-enderecos.md); troca de e-mail permanece para etapa posterior.

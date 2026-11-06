@@ -6,6 +6,7 @@ import io.swagger.v3.oas.models.media.*;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.security.*;
+import io.swagger.v3.oas.models.servers.Server;
 import java.util.*;
 import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.*;
@@ -21,6 +22,8 @@ public class OpenApiConfiguration {
     public OpenAPI identityOpenApi() {
         return new OpenAPI().info(new Info().title("OLIUS Core API").version("v1")
             .description("Cadastro, identidade, PEV, entregas e pontos B2C, pagamentos, solicitações, agenda, coletas B2B, certificados e consultas ambientais. Perfil e permissões são controlados no servidor; motoristas não possuem login."))
+            // Resolve na origem pública da documentação, mesmo quando o proxy chama a Core por HTTP.
+            .servers(List.of(new Server().url("/").description("Mesma origem da documentação")))
             .components(new Components()
                 .addSecuritySchemes(BEARER,new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme(BEARER).bearerFormat("JWT"))
                 .addSecuritySchemes(CSRF,new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-XSRF-TOKEN"))
@@ -37,6 +40,10 @@ public class OpenApiConfiguration {
             api.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, operation) -> {
                 documentSecurity(path, method, operation);
                 documentResponses(operation);
+                if (path.equals("/api/v1/chat") || path.startsWith("/api/v1/chat/sessions/")) {
+                    operation.getResponses().addApiResponse("502", error("Resposta inválida da assistente."));
+                    operation.getResponses().addApiResponse("504", error("Prazo da assistente excedido; não repetir automaticamente."));
+                }
                 if (!preservesDescription(path))
                     operation.setDescription(description(path, method));
                 documentPevResponse(path, method, operation);
@@ -48,7 +55,7 @@ public class OpenApiConfiguration {
         return List.of("/api/v1/collection-requests", "/api/v1/admin/collection-requests",
                 "/api/v1/billing/cycles/", "/api/v1/admin/drivers", "/api/v1/operations/b2b/",
                 "/api/v1/collections", "/api/v1/admin/collections", "/api/v1/certificate",
-                "/api/v1/admin/certificates").stream().anyMatch(path::startsWith)
+                "/api/v1/admin/certificates", "/api/v1/notifications").stream().anyMatch(path::startsWith)
             || path.equals("/api/v1/establishments/me/score")
             || path.startsWith("/api/v1/auth/password-reset")
             || path.endsWith("/certificate-progress") || path.endsWith("/environmental-summary");
@@ -165,11 +172,16 @@ public class OpenApiConfiguration {
         }
     }
 
+    /** Descreve as regras específicas de cada operação sem alterar sua autorização ou execução. */
     private String description(String path, PathItem.HttpMethod method) {
+        if (path.equals("/api/v1/chat"))
+            return "Encaminha session_id UUID e pergunta (1 a 4000 caracteres) à OlivIA com o access token autenticado. Inicie a conversa antes da primeira mensagem. Sem retry automático; timeout não garante cancelamento remoto.";
+        if (path.startsWith("/api/v1/chat/sessions/"))
+            return "Inicia ou encerra uma conversa da OlivIA com o UUID informado no caminho e o access token autenticado. A IA verifica a titularidade. Não recebe corpo; retorna session_id e resumo. Não confundir conversa com sessão de login.";
         if(path.equals("/api/v1/users/me/deliveries"))
             return "Somente cidadão ativo consulta entregas em que é beneficiário, pela identidade do Bearer. Inclui RECORDED e ANNULLED com volume, datas, pontos, estado e revisão operacional vigentes; não é histórico de auditoria. Retorna 200 com items, page, size e totalElements. Padrões page=0, size=20, máximo 100; ordem deliveryDate DESC, id DESC. Página além do total retorna items vazio e total preservado. Parâmetros vazios, inválidos ou deslocamento acima de Integer.MAX_VALUE retornam 400. ADMIN e estabelecimento recebem 403. Não retorna QR, chave de reenvio ou dados pessoais do responsável. Saldo e revisões de cálculo pertencem a /api/v1/users/me/points.";
         if(path.equals("/api/v1/pevs/me/address"))
-            return "Cidadão ou estabelecimento ativo edita somente o endereço do próprio PEV em PENDING ou REJECTED. Corpo: address completo no formato do cadastro; opcionais omitidos ficam nulos. Preserva ID do ponto, endereço, responsável e estado. Retorna 200 com o próprio PEV atualizado. Ausência de PEV retorna 404; estado incompatível retorna 409 BUSINESS_STATE_CONFLICT. Campos inválidos ou desconhecidos retornam 400. Auditoria e edição são transacionais.";
+            return "Responsável ativo substitui o endereço completo do próprio PEV. Mudança em APPROVED retorna PENDING e retira do mapa até nova aprovação; INACTIVE permanece inativo e REJECTED exige reapresentação separada. Endereço equivalente não cria revisão. Latitude/longitude são par ou ambas nulas, com até seis casas decimais significativas. Opcionais omitidos ficam nulos. Preserva ID, titular, entregas e pontos. Retorna 200; PEV ausente 404; campos inválidos ou desconhecidos 400. Auditoria e edição são transacionais.";
         if(path.equals("/api/v1/pevs/me/resubmissions"))
             return "Cidadão ou estabelecimento ativo reapresenta somente o próprio PEV REJECTED, sem corpo. Retorna 200 com o mesmo PEV em PENDING; preserva responsável, endereço e criação. Ausência de PEV retorna 404; outros estados, inclusive repetição, retornam 409 BUSINESS_STATE_CONFLICT. Bloqueio e auditoria transacionais impedem reapresentações simultâneas duplicadas. ADMIN não reapresenta em nome do titular.";
         if(path.equals("/api/v1/admin/deliveries/{id}/corrections"))
@@ -184,6 +196,10 @@ public class OpenApiConfiguration {
             return "Responsável ativo consulta apenas entregas do próprio PEV. Dados mínimos do cidadão: ID e nome. page começa em 0; size padrão 20 e máximo 100. Ordem createdAt DESC, id DESC; parâmetros vazios e deslocamento acima de Integer.MAX_VALUE retornam 400.";
         if(path.equals("/api/v1/pevs/{pevId}/deliveries/{deliveryId}") && method == PathItem.HttpMethod.GET)
             return "Responsável ativo consulta a entrega indicada por Location somente quando ela pertence ao próprio PEV. ID inexistente ou de outro PEV retorna 404; outro responsável recebe 403.";
+        if(path.equals("/api/v1/users/me") && method == PathItem.HttpMethod.PATCH)
+            return "Titular ativo altera somente nome e conjunto completo de telefones. Campos ausentes preservam valores; null, corpo vazio, duplicatas e campos protegidos retornam 400. Nome/telefones são atômicos; telefones mantidos preservam IDs. Não altera e-mail, privilégios, sessões ou endereço.";
+        if(path.equals("/api/v1/establishments/me/address") && method == PathItem.HttpMethod.PUT)
+            return "Estabelecimento ativo substitui o próprio endereço comercial completo, sem exigir plano. Endereço e par de coordenadas opcionais são substituídos; não há geocodificação. Mudança com pedido PENDING/APPROVED ainda sem registro de coleta retorna 409. PEV permanece independente. Reenvio equivalente não cria revisão.";
         if(path.equals("/api/v1/users/me/points") && method == PathItem.HttpMethod.GET)
             return "Cidadão autenticado consulta saldo geral do PostgreSQL e movimentações atuais de entregas, sem somar revisões antigas. page começa em 0; size padrão 20 e máximo 100. Ordem deliveryDate DESC, id DESC. Recorte anual de ranking não integra esta resposta.";
         if(path.equals("/api/v1/qr/resolutions") && method == PathItem.HttpMethod.POST)
@@ -197,7 +213,7 @@ public class OpenApiConfiguration {
         if(path.equals(PEVS_PATH) && method == PathItem.HttpMethod.POST)
             return "Cidadão ou estabelecimento ativo solicita um PEV com endereço próprio. O responsável vem do Bearer; status, aprovação e responsável não são aceitos no corpo. Solicitação duplicada retorna 409.";
         if(path.equals(PEVS_PATH) && method == PathItem.HttpMethod.GET)
-            return "Consulta pública de PEVs APPROVED, ordenados por createdAt ASC e id ASC. page começa em 0; size padrão 20 e máximo 100. Deslocamento acima de Integer.MAX_VALUE retorna 400.";
+            return "Consulta pública de PEVs APPROVED, ordenados por createdAt ASC e id ASC. Nome cadastral somente de estabelecimento; name nulo para cidadão. Endereço público não contém complemento. page começa em 0; size padrão 20 e máximo 100. Deslocamento acima de Integer.MAX_VALUE retorna 400.";
         if(path.equals("/api/v1/pevs/me") && method == PathItem.HttpMethod.GET)
             return "Cidadão ou estabelecimento ativo consulta apenas o próprio PEV. Retorna 404 quando ainda não existe solicitação.";
         if(path.equals("/api/v1/admin/pevs") && method == PathItem.HttpMethod.GET)

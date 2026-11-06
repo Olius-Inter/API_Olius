@@ -236,6 +236,56 @@ class CollectionRequestsIntegrationTest {
                 Long.class, request.id())).isEqualTo(2L);
     }
 
+    @Test void concurrentIdenticalSchedulingCommandsCreateOneHistoryAndNotice() throws Exception {
+        var request = create("10");
+        var agreed = Instant.now().minusSeconds(1).truncatedTo(ChronoUnit.MICROS);
+        var input = new Scheduling(agreed.plusSeconds(36000), agreed, REASON);
+        UUID key = UUID.randomUUID();
+        var results = race(() -> service.schedule(request.id(), adminId, input, key).id().toString(),
+                () -> service.schedule(request.id(), adminId, input, key).id().toString());
+        assertThat(results).containsOnly(request.id().toString());
+        assertThat(service.history(request.id(), accountId, false, new Pagination(0, 20)).totalElements()).isEqualTo(1);
+        assertThat(owner.queryForObject("SELECT count(*) FROM notification WHERE resource_id=?", Long.class, request.id())).isEqualTo(1L);
+        assertThat(owner.queryForObject("SELECT count(*) FROM collection_schedule_command WHERE request_id=?", Long.class, request.id())).isEqualTo(1L);
+    }
+
+    @Test void noOpSchedulingCommandCannotUndoLaterSchedule() {
+        var request = create("10");
+        var agreed = Instant.now().minusSeconds(1).truncatedTo(ChronoUnit.MICROS);
+        var original = new Scheduling(agreed.plusSeconds(36000), agreed, REASON);
+        service.schedule(request.id(), adminId, original, UUID.randomUUID());
+        UUID noOpKey = UUID.randomUUID();
+        service.schedule(request.id(), adminId, original, noOpKey);
+        var later = new Scheduling(agreed.plusSeconds(39600), agreed, "Novo acordo");
+        service.schedule(request.id(), adminId, later, UUID.randomUUID());
+        var replay = service.schedule(request.id(), adminId, original, noOpKey);
+        assertThat(replay.scheduledAt()).isEqualTo(later.scheduledAt());
+        assertThat(service.history(request.id(), accountId, false, new Pagination(0, 20)).totalElements()).isEqualTo(2);
+        assertThat(owner.queryForObject("SELECT count(*) FROM notification WHERE resource_id=?", Long.class, request.id())).isEqualTo(2L);
+        assertThat(owner.queryForObject("SELECT count(*) FROM collection_schedule_command WHERE request_id=?", Long.class, request.id())).isEqualTo(3L);
+    }
+
+    @Test void rejectedSchedulingDoesNotConsumeKeyAndInvalidHeaderDoesNotWrite() throws Exception {
+        var request = create("10");
+        UUID key = UUID.randomUUID();
+        var agreed = Instant.now().minusSeconds(1).truncatedTo(ChronoUnit.MICROS);
+        var invalid = new Scheduling(request.requestAt().minusSeconds(1), agreed, REASON);
+        String route = ADMIN + "/" + request.id() + "/scheduling";
+        mvc.perform(post(route).header("Authorization", "Bearer " + admin.access())
+                .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(invalid))).andExpect(status().isUnprocessableEntity());
+        assertThat(owner.queryForObject("SELECT count(*) FROM collection_schedule_command WHERE request_id=?", Long.class, request.id())).isZero();
+        assertThat(owner.queryForObject("SELECT count(*) FROM notification WHERE resource_id=?", Long.class, request.id())).isZero();
+        var valid = new Scheduling(agreed.plusSeconds(36000), agreed, REASON);
+        mvc.perform(post(route).header("Authorization", "Bearer " + admin.access())
+                .header("Idempotency-Key", "invalid").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(valid))).andExpect(status().isBadRequest());
+        mvc.perform(post(route).header("Authorization", "Bearer " + admin.access())
+                .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(valid))).andExpect(status().isOk());
+        assertThat(service.history(request.id(), accountId, false, new Pagination(0, 20)).totalElements()).isEqualTo(1);
+    }
+
     @Test void invalidSchedulingAndRejectionStatesHaveNoPartialEffects() throws Exception {
         var request=create("10");
         mvc.perform(post(ADMIN+"/"+request.id()+"/scheduling").header("Authorization","Bearer "+admin.access())
