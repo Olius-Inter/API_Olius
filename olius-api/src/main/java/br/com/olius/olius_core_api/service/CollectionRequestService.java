@@ -57,11 +57,11 @@ public class CollectionRequestService {
         UUID id=call(()->requests.create(actor,request,key));
         return find(id,actor,false);
     }
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public RequestView schedule(UUID id,UUID actor,Scheduling request) {
         return scheduleInternal(id,actor,request,null);
     }
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public RequestView schedule(UUID id,UUID actor,Scheduling request,UUID key) {
         return scheduleInternal(id,actor,request,key);
     }
