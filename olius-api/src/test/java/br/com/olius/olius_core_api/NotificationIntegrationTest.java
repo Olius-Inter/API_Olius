@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -35,6 +36,7 @@ class NotificationIntegrationTest {
         properties.add("spring.datasource.password",() -> OfficialPostgres.API_PASSWORD);
     }
     @Autowired MockMvc mvc;
+    @Autowired JdbcTemplate apiDatabase;
     @Autowired ObjectMapper json;
     private static final String PASSWORD="Password1!";
 
@@ -80,8 +82,11 @@ class NotificationIntegrationTest {
             .andExpect(status().isNoContent()).andExpect(header().string("Cache-Control", "no-store"));
         var readAt = admin().queryForObject("SELECT read_at FROM notification WHERE id=?",
                 java.sql.Timestamp.class, notice);
+        String firstReadVersion = admin().queryForObject("SELECT xmin::text FROM notification WHERE id=?", String.class, notice);
         mvc.perform(put("/api/v1/notifications/{id}/read", notice).header("Authorization", ownerBearer))
             .andExpect(status().isNoContent());
+        assertThat(admin().queryForObject("SELECT xmin::text FROM notification WHERE id=?", String.class, notice))
+            .isEqualTo(firstReadVersion);
         assertThat(readAt).isNotNull().isEqualTo(admin().queryForObject(
                 "SELECT read_at FROM notification WHERE id=?", java.sql.Timestamp.class, notice));
         mvc.perform(get("/api/v1/notifications/unread-count").header("Authorization", ownerBearer))
@@ -93,6 +98,28 @@ class NotificationIntegrationTest {
         mvc.perform(get("/api/v1/notifications").header("Authorization", ownerBearer))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
             .andExpect(jsonPath("$.items[0].id").value(notice.toString()));
+    }
+
+    @Test void requiresAuthenticationAndDoesNotExposeOtherRecipients() throws Exception {
+        mvc.perform(get("/api/v1/notifications")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/notifications/unread-count")).andExpect(status().isUnauthorized());
+        mvc.perform(put("/api/v1/notifications/{id}/read", UUID.randomUUID()))
+            .andExpect(status().isUnauthorized());
+        var account = citizen();
+        mvc.perform(put("/api/v1/notifications/{id}/read", UUID.randomUUID())
+                .header("Authorization", "Bearer " + login(account.email())))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test void databaseAccountCannotCreateNotificationsOrReadScheduleCommands() {
+        assertThatThrownBy(() -> apiDatabase.update("INSERT INTO public.notification DEFAULT VALUES"))
+            .isInstanceOf(org.springframework.dao.DataAccessException.class)
+            .rootCause().isInstanceOf(org.postgresql.util.PSQLException.class)
+            .satisfies(cause -> assertThat(((java.sql.SQLException) cause).getSQLState()).isEqualTo("42501"));
+        assertThatThrownBy(() -> apiDatabase.queryForList("SELECT * FROM public.collection_schedule_command"))
+            .isInstanceOf(org.springframework.dao.DataAccessException.class)
+            .rootCause().isInstanceOf(org.postgresql.util.PSQLException.class)
+            .satisfies(cause -> assertThat(((java.sql.SQLException) cause).getSQLState()).isEqualTo("42501"));
     }
 
     private Account citizen() throws Exception {

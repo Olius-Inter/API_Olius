@@ -39,8 +39,14 @@ public class NotificationRepository {
 
     public int markRead(UUID recipient, UUID id) {
         return jdbc.update("""
-                UPDATE public.notification SET read_at = COALESCE(read_at, clock_timestamp())
-                WHERE recipient_id = ? AND id = ?
+                UPDATE public.notification SET read_at = clock_timestamp()
+                WHERE recipient_id = ? AND id = ? AND read_at IS NULL
                 """, recipient, id);
+    }
+
+    public boolean exists(UUID recipient, UUID id) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM public.notification WHERE recipient_id = ? AND id = ?)
+                """, Boolean.class, recipient, id));
     }
 }
