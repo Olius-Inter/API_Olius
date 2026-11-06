@@ -23,21 +23,21 @@ public class NotificationController {
     }
 
     @GetMapping
-    @Operation(summary = "Listar avisos da conta autenticada")
+    @Operation(summary = "Listar avisos da conta autenticada", description = "Página de avisos próprios, obtidos pelo Bearer e sessão ativa. page=0, size=20 (máximo 100), unreadOnly=false. Ordem createdAt DESC,id DESC; resource não concede autorização sobre o recurso relacionado. Não envia push ou e-mail.")
     public ResponseEntity<Page> list(@Valid @ModelAttribute Query query, Authentication auth) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(service.list(Caller.id(auth), query));
     }
 
     @GetMapping("/unread-count")
-    @Operation(summary = "Contar avisos não lidos da conta autenticada")
+    @Operation(summary = "Contar avisos não lidos da conta autenticada", description = "Conta somente avisos do destinatário autenticado com readAt ausente.")
     public ResponseEntity<Count> unreadCount(Authentication auth) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(new Count(service.unreadCount(Caller.id(auth))));
     }
 
     @PutMapping("/{id}/read")
-    @Operation(summary = "Marcar um aviso próprio como lido, preservando a primeira leitura")
+    @Operation(summary = "Marcar um aviso próprio como lido, preservando a primeira leitura", description = "Sem corpo. Retorna 204 inclusive no reenvio de aviso próprio já lido, sem atualizar novamente o registro; ID inexistente ou de outro destinatário retorna 404.")
     public ResponseEntity<Void> markRead(@PathVariable UUID id, Authentication auth) {
         service.markRead(Caller.id(auth), id);
         return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();

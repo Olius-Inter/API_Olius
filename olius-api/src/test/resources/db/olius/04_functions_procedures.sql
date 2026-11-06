@@ -2814,7 +2814,7 @@ END $$;
 REVOKE ALL ON FUNCTION public.issue_password_reset(TEXT,BYTEA,INTERVAL),
     public.complete_password_reset(BYTEA,TEXT) FROM PUBLIC;
 
-CREATE PROCEDURE public.schedule_collection_request_once(
+CREATE OR REPLACE PROCEDURE public.schedule_collection_request_once(
     p_request_id UUID, p_scheduled_at TIMESTAMPTZ, p_agreed_at TIMESTAMPTZ,
     p_admin_id UUID, p_reason TEXT, p_key UUID
 )
@@ -2823,6 +2823,7 @@ AS $schedule_once$
 DECLARE
     v_command public.collection_schedule_command%ROWTYPE;
     v_request_at TIMESTAMPTZ;
+    v_constraint TEXT;
 BEGIN
     IF p_key IS NULL THEN
         RAISE EXCEPTION 'Chave de idempotencia obrigatoria.' USING ERRCODE = '22023';
@@ -2856,9 +2857,19 @@ BEGIN
 
     CALL public.schedule_collection_request(
         p_request_id, p_scheduled_at, p_agreed_at, p_admin_id, p_reason);
-    INSERT INTO public.collection_schedule_command
-        (request_id, idempotency_key, scheduled_at, agreed_at, admin_id, reason)
-    VALUES (p_request_id, p_key, p_scheduled_at, p_agreed_at, p_admin_id, btrim(p_reason));
+    BEGIN
+        INSERT INTO public.collection_schedule_command
+            (request_id, idempotency_key, scheduled_at, agreed_at, admin_id, reason)
+        VALUES (p_request_id, p_key, p_scheduled_at, p_agreed_at, p_admin_id, btrim(p_reason));
+    EXCEPTION WHEN unique_violation THEN
+        GET STACKED DIAGNOSTICS v_constraint = CONSTRAINT_NAME;
+        IF v_constraint IS DISTINCT FROM 'collection_schedule_command_pkey' THEN
+            RAISE;
+        END IF;
+        -- Snapshot antigo pode não enxergar um comando confirmado; não aceitar sem comparar.
+        RAISE EXCEPTION 'Conflito concorrente de agendamento; repita a transação completa com a mesma chave e dados.'
+            USING ERRCODE = '40001';
+    END;
 END;
 $schedule_once$;
 REVOKE ALL ON PROCEDURE public.schedule_collection_request_once(UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID,TEXT,UUID) FROM PUBLIC;

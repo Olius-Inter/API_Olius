@@ -1504,11 +1504,7 @@ CREATE TABLE public.notification (
     event_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     read_at TIMESTAMPTZ,
-    CONSTRAINT uq_notification_event UNIQUE (recipient_id, type, event_id),
-    CONSTRAINT ck_notification_type CHECK (
-        (resource_type = 'PEV' AND type IN ('PEV_APPROVED', 'PEV_REJECTED', 'PEV_INACTIVATED', 'PEV_REACTIVATED'))
-        OR (resource_type = 'COLLECTION_REQUEST' AND type IN ('COLLECTION_REQUEST_SCHEDULED', 'COLLECTION_REQUEST_RESCHEDULED'))
-    )
+    CONSTRAINT uq_notification_event UNIQUE (recipient_id, type, event_id)
 );
 REVOKE ALL ON public.notification FROM PUBLIC;
 

@@ -32,7 +32,7 @@ public class NotificationService {
 
     @Transactional
     public void markRead(UUID recipient, UUID id) {
-        if (notifications.markRead(recipient, id) == 0) {
+        if (notifications.markRead(recipient, id) == 0 && !notifications.exists(recipient, id)) {
             throw new ResourceNotFoundException();
         }
     }

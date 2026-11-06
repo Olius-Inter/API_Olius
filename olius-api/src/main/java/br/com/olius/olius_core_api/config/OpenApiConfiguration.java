@@ -55,7 +55,7 @@ public class OpenApiConfiguration {
         return List.of("/api/v1/collection-requests", "/api/v1/admin/collection-requests",
                 "/api/v1/billing/cycles/", "/api/v1/admin/drivers", "/api/v1/operations/b2b/",
                 "/api/v1/collections", "/api/v1/admin/collections", "/api/v1/certificate",
-                "/api/v1/admin/certificates").stream().anyMatch(path::startsWith)
+                "/api/v1/admin/certificates", "/api/v1/notifications").stream().anyMatch(path::startsWith)
             || path.equals("/api/v1/establishments/me/score")
             || path.startsWith("/api/v1/auth/password-reset")
             || path.endsWith("/certificate-progress") || path.endsWith("/environmental-summary");
