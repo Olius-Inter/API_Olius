@@ -1491,3 +1491,31 @@ CREATE TABLE public.password_reset_token_log (
     CONSTRAINT uq_password_reset_log_snapshot UNIQUE(audit_event_id,id,snapshot_kind)
 );
 COMMENT ON TABLE public.password_reset_token_log IS 'Auditoria de emissão, consumo e invalidação. Não possui hash de token ou senha; eventos públicos usam SYSTEM.';
+
+-- Central de notificações para os eventos aprovados.
+CREATE TABLE public.notification (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipient_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id UUID NOT NULL,
+    event_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    read_at TIMESTAMPTZ,
+    CONSTRAINT uq_notification_event UNIQUE (recipient_id, type, event_id)
+);
+REVOKE ALL ON public.notification FROM PUBLIC;
+
+-- Guarda a chave mesmo quando a operacao nao muda o horario nem gera historico.
+CREATE TABLE public.collection_schedule_command (
+    request_id UUID NOT NULL REFERENCES public.collection_request(id) ON DELETE CASCADE,
+    idempotency_key UUID NOT NULL,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    agreed_at TIMESTAMPTZ NOT NULL,
+    admin_id UUID NOT NULL,
+    reason TEXT NOT NULL,
+    PRIMARY KEY (request_id, idempotency_key)
+);
+REVOKE ALL ON public.collection_schedule_command FROM PUBLIC;

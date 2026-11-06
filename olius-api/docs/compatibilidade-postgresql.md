@@ -85,3 +85,29 @@ sobre as rotinas de reserva, agenda e cancelamento já definidas.
 ## Recuperação de senha — 01/11/2026
 
 Snapshot atualizado para DB_Segundo feat/password-reset, commit 7e6ed3c. Login exige open_auth_session(uuid,bytea,text); o contrato anterior é incompatível. Migração oficial permanece no repositório do banco e não é aplicada automaticamente pela Core. Ver [recuperacao-de-senha.md](recuperacao-de-senha.md) para implantação coordenada, permissões e pendências.
+
+
+## Notificações e agenda idempotente — 06/11/2026
+
+Referência atual: `01_DB_Segundo`, main `42f9977`. Os 16 recursos SQL do
+snapshot reproduzem os scripts oficiais revisados, com hashes LF e hashes de
+origem no manifesto. O schema public da instalação de teste contém 65 tabelas:
+62 da estrutura principal (incluindo 25 logs) e três do catálogo documental.
+Os objetos técnicos opcionais de `olius_etl` não pertencem à instalação da Core.
+
+As mudanças são aditivas: autenticação, convites, pagamentos e operações anteriores
+mantêm seus contratos. As triggers inserem notificações junto da transação da
+operação; a Core consulta somente o destinatário autenticado e marca a primeira
+leitura. Não insere avisos nem consulta diretamente collection_schedule_command.
+A rotina schedule_collection_request_once recebe a chave da ação de agenda.
+
+A fixture cria um banco descartável completo; não migra ambientes existentes.
+Antes da publicação das funcionalidades, confirmar no destino as migrações
+20261104_notifications.sql e 20261104_schedule_idempotency.sql, nesta ordem,
+com a conta de implantação autorizada. Não reaplicar os scripts de criação sobre
+uma base em uso nem ampliar os privilégios da Core. A presença no repositório
+não comprova que as migrações foram aplicadas no Aiven ou no desenvolvimento.
+
+O refresh do Data Mart (script 09) pertence à operação de BI. Não precisa ser
+executado no startup da Core. Importação legada e tabelas de proveniência também
+continuam sob responsabilidade da manutenção; não geram acesso extra pela API.

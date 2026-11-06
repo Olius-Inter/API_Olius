@@ -25,6 +25,8 @@ BEGIN;
 CREATE TEMP TABLE olius_permission_scope (object_name text PRIMARY KEY) ON COMMIT DROP;
 INSERT INTO olius_permission_scope VALUES
     ('users'),
+    ('notification'),
+    ('collection_schedule_command'),
     ('establishment_type'),
     ('addresses'),
     ('telephone'),
@@ -777,6 +779,34 @@ END $password_reset_routines$;
 REVOKE CREATE ON SCHEMA public FROM olius_auth_owner;
 ALTER FUNCTION public.fn_olius_password_reset_guard() OWNER TO olius_owner;
 REVOKE ALL ON FUNCTION public.fn_olius_password_reset_guard() FROM PUBLIC,olius_api;
+
+
+-- A Core aplica a titularidade; somente as triggers inserem avisos.
+ALTER FUNCTION public.notify_pev_status_change() OWNER TO olius_owner;
+ALTER FUNCTION public.notify_collection_schedule_change() OWNER TO olius_owner;
+ALTER PROCEDURE public.schedule_collection_request_once(UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID,TEXT,UUID) OWNER TO olius_owner;
+SET LOCAL ROLE olius_owner;
+GRANT SELECT, UPDATE (read_at) ON public.notification TO olius_api;
+-- Falhar fechado em ACLs extras: REVOKE de PUBLIC não remove concessões explícitas.
+DO $schedule_once_acl$
+DECLARE r RECORD;
+BEGIN
+    IF (SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace='public'::regnamespace
+        AND proname='schedule_collection_request_once') <> 1 THEN
+        RAISE EXCEPTION 'Sobrecarga de agendamento idempotente não revisada.' USING ERRCODE='42501';
+    END IF;
+    SELECT proowner,proacl INTO STRICT r FROM pg_catalog.pg_proc
+    WHERE oid='public.schedule_collection_request_once(uuid,timestamptz,timestamptz,uuid,text,uuid)'::regprocedure;
+    IF EXISTS(SELECT 1 FROM pg_catalog.aclexplode(coalesce(r.proacl,pg_catalog.acldefault('f',r.proowner))) a
+        WHERE a.privilege_type='EXECUTE'
+          AND a.grantee NOT IN (r.proowner,'olius_owner'::regrole,'olius_api'::regrole)) THEN
+        RAISE EXCEPTION 'Agendamento idempotente tem EXECUTE externo; revisar concessões antes de implantar.'
+            USING ERRCODE='42501';
+    END IF;
+END $schedule_once_acl$;
+
+GRANT EXECUTE ON PROCEDURE public.schedule_collection_request_once(UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID,TEXT,UUID) TO olius_api;
+RESET ROLE;
 
 COMMIT;
 

@@ -235,3 +235,8 @@ CREATE INDEX idx_password_reset_log_history ON public.password_reset_token_log(i
 -- Lookup preserva caixa local e normaliza só domínio; UNIQUE(email) não indexa essas expressões.
 CREATE INDEX idx_users_password_reset_email ON public.users
     ((split_part(email,'@',1)),(lower(split_part(email,'@',2))));
+
+CREATE INDEX idx_notification_recipient_recent
+    ON public.notification (recipient_id, created_at DESC, id DESC);
+CREATE INDEX idx_notification_recipient_unread
+    ON public.notification (recipient_id, created_at DESC, id DESC) WHERE read_at IS NULL;

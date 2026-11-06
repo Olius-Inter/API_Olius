@@ -1037,3 +1037,10 @@ ALTER TABLE public.password_reset_token_log
     ADD CONSTRAINT ck_password_reset_log_actor CHECK(
         actor_kind='SYSTEM' AND performed_by IS NULL AND operational_driver_id IS NULL),
     ADD CONSTRAINT ck_password_reset_log_date CHECK(isfinite(performed_at));
+
+-- Restringe a central aos eventos de PEV e agendamento aprovados para cada recurso.
+ALTER TABLE public.notification
+    ADD CONSTRAINT ck_notification_type CHECK (
+        (resource_type = 'PEV' AND type IN ('PEV_APPROVED', 'PEV_REJECTED', 'PEV_INACTIVATED', 'PEV_REACTIVATED'))
+        OR (resource_type = 'COLLECTION_REQUEST' AND type IN ('COLLECTION_REQUEST_SCHEDULED', 'COLLECTION_REQUEST_RESCHEDULED'))
+    );
