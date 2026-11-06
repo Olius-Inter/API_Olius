@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/central-notificacoes
+      - fix/idempotencia-agendamento-b2b
 
   push:
     branches:
