@@ -112,5 +112,27 @@ atrasado, comando sem mudança de horário, disputa de comandos iguais e rollbac
 O CI contempla os três destinos da stack: main, feat/central-notificacoes e
 fix/idempotencia-agendamento-b2b, preservando a matriz PostgreSQL 16.15/18.6.
 
-Os resultados finais locais e seus limites serão registrados após a validação.
+Validação local concluída em 06/11/2026, sobre o código de 1c92848:
+
+| Execução | Resultado |
+|---|---|
+| Suíte completa, PostgreSQL 16.15 | 746 testes, zero falhas/erros/ignorados; BUILD SUCCESS. |
+| Contratos principais, PostgreSQL 18.6 | 102 testes, zero falhas/erros/ignorados; BUILD SUCCESS. |
+| Conferência dos recursos SQL | Os 16 recursos correspondem à referência oficial; manifesto válido. |
+| CI YAML e diffs da stack | Destinos conferidos e git diff --check aprovado. |
+
+A execução 18.6 cobriu autenticação, convites, recuperação, notificações, agenda,
+manifesto, inicialização e instalação sem SUPERUSER. Não representa a suíte
+completa nessa versão. Foram usadas cópias isoladas somente com arquivos Git,
+sem .env, integrações reais Stripe/SMTP ou dados reais.
+
+O Windows exigiu um diretório temporário explícito para sockets da JDK
+(jdk.net.unixdomain.tmpdir), somente nos processos de validação. A limpeza do
+build no OneDrive encontrou arquivos bloqueados; por isso a validação final foi
+feita nas cópias isoladas. Não foram alteradas propriedades da aplicação para
+contornar essas condições. Avisos de pools associados a containers encerrados
+não foram ocultados e não causaram falhas na suíte.
+
 A aprovação do CI/Sonar remoto depende da publicação das branches corrigidas.
+As migrações e a instalação efetiva nos bancos reais não foram homologadas por
+estas execuções. Retenção/expurgo continuam pendentes de decisão da equipe.
