@@ -90,9 +90,14 @@ public class CollectionRequestRepository {
         return jdbc.queryForObject("CALL public.create_collection_request(?,?,?,?,NULL)",UUID.class,
                 actor,request.estimatedVolumeLiters(),request.observation(),key);
     }
-    public void schedule(UUID id,UUID actor,Scheduling request) {
-        jdbc.update("CALL public.schedule_collection_request(?,?,?,?,?)",id,timestamp(request.scheduledAt()),
-                timestamp(request.agreedAt()),actor,request.reason());
+    public void schedule(UUID id,UUID actor,Scheduling request,UUID key) {
+        if (key == null) {
+            jdbc.update("CALL public.schedule_collection_request(?,?,?,?,?)",id,timestamp(request.scheduledAt()),
+                    timestamp(request.agreedAt()),actor,request.reason());
+        } else {
+            jdbc.update("CALL public.schedule_collection_request_once(?,?,?,?,?,?)",id,timestamp(request.scheduledAt()),
+                    timestamp(request.agreedAt()),actor,request.reason(),key);
+        }
     }
     public void reject(UUID id,UUID actor,String reason) {
         jdbc.queryForObject("SELECT public.reject_collection_request(?,?,?)",Object.class,id,actor,reason);
